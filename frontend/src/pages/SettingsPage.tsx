@@ -12,6 +12,7 @@ import {
   Toggle,
 } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
+import { AlertRules } from "@/components/settings/AlertRules";
 import { api } from "@/lib/api";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
 import { useAuth } from "@/store/useAuth";
@@ -37,6 +38,7 @@ export default function SettingsPage() {
         {device && <DeviceSettings device={device} />}
         {device && <WorkspaceSettings device={device} />}
         <HardwareSettings />
+        <AlertRules />
 
         <div className="space-y-5">
           <Card>

@@ -408,6 +408,8 @@ export type SocketMessage =
   | { type: "rpc"; payload: Record<string, unknown> }
   | { type: "reading"; payload: { sensor_id: string | null; value: number; read_at: string } }
   | { type: "image"; payload: { id: string; url: string } }
+  | { type: "notification"; payload: { count: number } }
+  | { type: "pin_read"; payload: { pin: number; value: number } }
   | { type: "telemetry"; payload: Record<string, unknown> }
   | { type: "ping" }
   | { type: "pong" };

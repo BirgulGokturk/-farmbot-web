@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Box,
   CalendarClock,
   Droplets,
   Flame,
+  Grid2x2,
   Leaf,
   // Yerleşik `Map` sınıfını gölgelemesin diye takma adla alınıyor
   Map as MapIcon,
@@ -26,6 +28,7 @@ import {
   PageHeader,
   Select,
   Skeleton,
+  Spinner,
   Toggle,
 } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
@@ -43,6 +46,11 @@ import { growthAt } from "@/lib/growth";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
 import { useBotPosition } from "@/store/useBot";
 import type { PlantSpecies, PlantStage, Point } from "@/lib/types";
+
+// three.js ağır; yalnızca 3D moda geçilince indirilsin
+const Garden3D = lazy(() =>
+  import("@/components/designer/Garden3D").then((module) => ({ default: module.Garden3D })),
+);
 
 const STAGE_LABELS: Record<PlantStage, string> = {
   planned: "Planlandı",
@@ -66,6 +74,7 @@ export default function Designer() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [dayOffset, setDayOffset] = useState(0);
+  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
   const [heatmapOn, setHeatmapOn] = useState(false);
   const [heatSensorId, setHeatSensorId] = useState<string>("");
   const canvasRef = useRef<GardenCanvasHandle>(null);
@@ -388,13 +397,38 @@ export default function Designer() {
             )}
           </div>
 
+          {/* Görünüm modu */}
+          <div className="flex items-center gap-1 rounded-xl bg-surface-2 p-1">
+            {(["2d", "3d"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-soft",
+                  viewMode === mode
+                    ? "bg-gradient-brand text-white shadow-soft"
+                    : "text-muted hover:text-content",
+                )}
+              >
+                {mode === "2d" ? <Grid2x2 className="size-3.5" /> : <Box className="size-3.5" />}
+                {mode === "2d" ? "Kuşbakışı" : "3D"}
+              </button>
+            ))}
+          </div>
+
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1.5 text-sm text-muted">
               <Flame className="size-4" />
               Isı haritası
             </span>
-            <Toggle checked={heatmapOn} onChange={setHeatmapOn} label="Isı haritası" tone="warning" />
-            {heatmapOn && (
+            <Toggle
+              checked={heatmapOn}
+              onChange={setHeatmapOn}
+              label="Isı haritası"
+              tone="warning"
+              disabled={viewMode === "3d"}
+            />
+            {heatmapOn && viewMode === "2d" && (
               <Select
                 name="heatSensor"
                 value={heatSensorId}
@@ -466,6 +500,28 @@ export default function Designer() {
         <div className="order-1 h-[62vh] min-h-[420px] xl:order-2 xl:h-[calc(100vh-20rem)]">
           {isLoading || !device ? (
             <Skeleton className="h-full w-full" />
+          ) : viewMode === "3d" ? (
+            <Suspense
+              fallback={
+                <div className="grid h-full w-full place-items-center rounded-[var(--radius-card)] border border-line bg-surface-2">
+                  <div className="flex flex-col items-center gap-3 text-muted">
+                    <Spinner className="size-7 text-brand" />
+                    <p className="text-sm">3D sahne yükleniyor…</p>
+                  </div>
+                </div>
+              }
+            >
+              <Garden3D
+                device={device}
+                points={points ?? []}
+                botPosition={botPosition}
+                selectedIds={selectedIds}
+                onSelectionChange={setSelectedIds}
+                onMovePoints={handleMovePoints}
+                viewDate={viewDate}
+                curves={curves}
+              />
+            </Suspense>
           ) : (
             <GardenCanvas
               ref={canvasRef}

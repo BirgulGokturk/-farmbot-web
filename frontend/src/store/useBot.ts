@@ -22,6 +22,8 @@ interface BotState {
   status: DeviceStatus | null;
   logs: LiveLog[];
   lastReadings: Record<string, { value: number; read_at: string }>;
+  /** Yeni bildirim geldiğinde artan sayaç — çan ikonu bunu izleyip listeyi tazeler. */
+  notificationTick: number;
 
   attach: (deviceId: string) => void;
   detach: () => void;
@@ -37,6 +39,7 @@ export const useBot = create<BotState>((set, get) => ({
   status: null,
   logs: [],
   lastReadings: {},
+  notificationTick: 0,
 
   attach(deviceId) {
     const current = get();
@@ -69,13 +72,17 @@ export const useBot = create<BotState>((set, get) => ({
           break;
         }
 
+        case "notification":
+          set((state) => ({ notificationTick: state.notificationTick + 1 }));
+          break;
+
         default:
           break;
       }
     });
 
     socket.connect();
-    set({ deviceId, socket, status: null, logs: [], lastReadings: {} });
+    set({ deviceId, socket, status: null, logs: [], lastReadings: {}, notificationTick: 0 });
   },
 
   detach() {

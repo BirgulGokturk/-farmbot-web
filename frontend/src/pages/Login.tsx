@@ -4,6 +4,11 @@ import { Button, Input } from "@/components/ui/primitives";
 import { BotLogo } from "@/components/layout/BotLogo";
 import { useAuth } from "@/store/useAuth";
 
+/** Demo hesap yalnızca yerel geliştirmede vardır; kutu sadece orada gösterilir. */
+const isLocalDevelopment =
+  import.meta.env.DEV ||
+  ["localhost", "127.0.0.1"].includes(window.location.hostname);
+
 export default function Login() {
   const login = useAuth((s) => s.login);
   const register = useAuth((s) => s.register);
@@ -102,21 +107,33 @@ export default function Login() {
           </button>
         </div>
 
-        {/* Geliştirme kolaylığı: seed ile oluşturulan demo hesap */}
-        <div className="mt-4 rounded-xl border border-line bg-surface-2/60 p-4 text-center">
-          <p className="text-xs text-subtle">Demo hesap</p>
-          <p className="mt-1 font-mono text-xs text-muted">demo@farmbot.dev · farmbot123</p>
-          <button
-            onClick={() => {
-              setEmail("demo@farmbot.dev");
-              setPassword("farmbot123");
-              setMode("login");
-            }}
-            className="mt-2 text-xs font-medium text-brand transition-soft hover:underline"
-          >
-            Bilgileri doldur
-          </button>
-        </div>
+        {/*
+          Demo hesap yalnızca geliştirme ortamında oluşturulur (bkz. db/seed.py).
+          Üretimde bu kutuyu göstermek olmayan bir hesabı önermek olurdu.
+        */}
+        {isLocalDevelopment && (
+          <div className="mt-4 rounded-xl border border-line bg-surface-2/60 p-4 text-center">
+            <p className="text-xs text-subtle">Demo hesap (yalnızca geliştirme)</p>
+            <p className="mt-1 font-mono text-xs text-muted">demo@farmbot.dev · farmbot123</p>
+            <button
+              onClick={() => {
+                setEmail("demo@farmbot.dev");
+                setPassword("farmbot123");
+                setMode("login");
+              }}
+              className="mt-2 text-xs font-medium text-brand transition-soft hover:underline"
+            >
+              Bilgileri doldur
+            </button>
+          </div>
+        )}
+
+        {!isLocalDevelopment && mode === "login" && (
+          <p className="mt-4 text-center text-xs text-subtle">
+            İlk kez mi giriyorsunuz? Yukarıdan hesap oluşturun — ardından robotunuzu
+            tanımlayacağınız kurulum ekranı gelir.
+          </p>
+        )}
       </div>
     </div>
   );

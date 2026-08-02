@@ -10,6 +10,7 @@ import { useAuth } from "@/store/useAuth";
 import { useBot } from "@/store/useBot";
 import { useTheme } from "@/store/useTheme";
 import { EmergencyStop } from "@/components/control/EmergencyStop";
+import { NotificationBell } from "./NotificationBell";
 
 export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { pathname } = useLocation();
@@ -59,6 +60,8 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         )}
 
         <div className="flex items-center gap-1">
+          <NotificationBell />
+
           <IconButton label="Durumu yenile" onClick={handleSync} disabled={syncing || !deviceId}>
             <RefreshCw className={syncing ? "size-4 animate-spin" : "size-4"} />
           </IconButton>
