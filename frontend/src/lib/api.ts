@@ -7,10 +7,16 @@
  */
 
 import type {
+  AlertRule,
+  AlertRuleInput,
+  AppNotification,
   CalendarOccurrence,
   CapturedImage,
   CommandResponse,
+  Curve,
+  CurveType,
   Device,
+  NotificationSummary,
   DeviceStatus,
   FarmEvent,
   LogEntry,
@@ -23,6 +29,7 @@ import type {
   Sensor,
   SensorSeries,
   Sequence,
+  SpatialReading,
   TokenPair,
   Tool,
   User,
@@ -283,6 +290,9 @@ export const api = {
         method: "DELETE",
         query: { permanent },
       }),
+    /** Yumuşak silinmiş noktayı geri getirir — geri alma bunu kullanır. */
+    restore: (deviceId: string, pointId: string) =>
+      request<Point>(`/devices/${deviceId}/points/${pointId}/restore`, { method: "POST" }),
   },
 
   catalog: {
@@ -293,6 +303,56 @@ export const api = {
     tools: (deviceId: string) => request<Tool[]>(`/devices/${deviceId}/tools`),
     createTool: (deviceId: string, input: { name: string; icon?: string }) =>
       request<Tool>(`/devices/${deviceId}/tools`, { method: "POST", body: input }),
+
+    curves: (deviceId: string) => request<Curve[]>(`/devices/${deviceId}/curves`),
+    createCurve: (
+      deviceId: string,
+      input: { name: string; curve_type: CurveType; data: Record<string, number> },
+    ) => request<Curve>(`/devices/${deviceId}/curves`, { method: "POST", body: input }),
+    updateCurve: (
+      deviceId: string,
+      id: string,
+      input: { name?: string; data?: Record<string, number> },
+    ) =>
+      request<Curve>(`/devices/${deviceId}/curves/${id}`, {
+        method: "PATCH",
+        body: input,
+      }),
+    removeCurve: (deviceId: string, id: string) =>
+      request<{ detail: string }>(`/devices/${deviceId}/curves/${id}`, {
+        method: "DELETE",
+      }),
+  },
+
+  alerts: {
+    rules: (deviceId: string) => request<AlertRule[]>(`/devices/${deviceId}/alert-rules`),
+    createRule: (deviceId: string, input: AlertRuleInput) =>
+      request<AlertRule>(`/devices/${deviceId}/alert-rules`, {
+        method: "POST",
+        body: input,
+      }),
+    updateRule: (deviceId: string, id: string, input: Partial<AlertRuleInput>) =>
+      request<AlertRule>(`/devices/${deviceId}/alert-rules/${id}`, {
+        method: "PATCH",
+        body: input,
+      }),
+    removeRule: (deviceId: string, id: string) =>
+      request<{ detail: string }>(`/devices/${deviceId}/alert-rules/${id}`, {
+        method: "DELETE",
+      }),
+
+    notifications: (deviceId: string, limit = 30) =>
+      request<NotificationSummary>(`/devices/${deviceId}/notifications`, {
+        query: { limit },
+      }),
+    markRead: (deviceId: string, id: number) =>
+      request<AppNotification>(`/devices/${deviceId}/notifications/${id}/read`, {
+        method: "POST",
+      }),
+    markAllRead: (deviceId: string) =>
+      request<{ detail: string }>(`/devices/${deviceId}/notifications/read-all`, {
+        method: "POST",
+      }),
   },
 
   hardware: {
@@ -311,6 +371,12 @@ export const api = {
       }),
     latestReadings: (deviceId: string) =>
       request<import("./types").SensorReading[]>(`/devices/${deviceId}/readings/latest`),
+
+    /** Isı haritası için konumlu ölçümler. */
+    spatialReadings: (
+      deviceId: string,
+      params?: { sensor_id?: string; hours?: number; limit?: number },
+    ) => request<SpatialReading[]>(`/devices/${deviceId}/readings/spatial`, { query: params }),
   },
 
   sequences: {

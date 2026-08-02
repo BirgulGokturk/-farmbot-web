@@ -13,6 +13,7 @@ from app.schemas.common import Message
 from app.schemas.garden import (
     CurveCreate,
     CurveRead,
+    CurveUpdate,
     PlantSpeciesCreate,
     PlantSpeciesRead,
     ToolCreate,
@@ -118,4 +119,35 @@ async def create_curve(payload: CurveCreate, device: OwnedDevice, db: DbSession)
     db.add(curve)
     await db.commit()
     await db.refresh(curve)
+    return curve
+
+
+@router.patch("/devices/{device_id}/curves/{curve_id}", response_model=CurveRead)
+async def update_curve(
+    curve_id: uuid.UUID, payload: CurveUpdate, device: OwnedDevice, db: DbSession
+) -> Curve:
+    """Eğri editöründe nokta sürüklendiğinde çağrılır."""
+    curve = await _get_curve(db, device.id, curve_id)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(curve, field, value)
+    await db.commit()
+    await db.refresh(curve)
+    return curve
+
+
+@router.delete("/devices/{device_id}/curves/{curve_id}", response_model=Message)
+async def delete_curve(curve_id: uuid.UUID, device: OwnedDevice, db: DbSession) -> Message:
+    curve = await _get_curve(db, device.id, curve_id)
+    await db.delete(curve)
+    await db.commit()
+    return Message(detail="Eğri silindi")
+
+
+async def _get_curve(db: DbSession, device_id: uuid.UUID, curve_id: uuid.UUID) -> Curve:
+    result = await db.execute(
+        select(Curve).where(Curve.id == curve_id, Curve.device_id == device_id)
+    )
+    curve = result.scalar_one_or_none()
+    if curve is None:
+        raise HTTPException(404, detail="Eğri bulunamadı")
     return curve

@@ -77,6 +77,15 @@ class SensorSeriesPoint(BaseModel):
     v: float
 
 
+class SpatialReading(BaseModel):
+    """Isı haritası için konumlu ölçüm."""
+
+    x: float
+    y: float
+    value: float
+    read_at: datetime
+
+
 class SensorSeries(BaseModel):
     sensor_id: uuid.UUID
     label: str

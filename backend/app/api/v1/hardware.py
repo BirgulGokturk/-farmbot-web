@@ -20,6 +20,7 @@ from app.schemas.hardware import (
     SensorReadingRead,
     SensorSeries,
     SensorSeriesPoint,
+    SpatialReading,
 )
 
 router = APIRouter(prefix="/devices/{device_id}", tags=["Donanım"])
@@ -174,6 +175,42 @@ async def sensor_series(
         unit=sensor.unit,
         points=[SensorSeriesPoint(t=row.read_at, v=row.value) for row in rows],
     )
+
+
+@router.get("/readings/spatial", response_model=list[SpatialReading])
+async def spatial_readings(
+    device: OwnedDevice,
+    db: DbSession,
+    sensor_id: uuid.UUID | None = Query(default=None, description="Tek sensöre filtrele"),
+    hours: int = Query(default=168, ge=1, le=24 * 90),
+    limit: int = Query(default=400, ge=10, le=2000),
+) -> list[SpatialReading]:
+    """Konumu bilinen ölçümler — tasarımcıdaki ısı haritası için.
+
+    Robot ölçümü nerede aldıysa oraya işaretlenir; böylece bahçenin hangi
+    bölgesinin kuru kaldığı haritada görülebilir.
+    """
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    conditions = [
+        SensorReading.device_id == device.id,
+        SensorReading.read_at >= since,
+        SensorReading.x.is_not(None),
+        SensorReading.y.is_not(None),
+    ]
+    if sensor_id is not None:
+        conditions.append(SensorReading.sensor_id == sensor_id)
+
+    result = await db.execute(
+        select(SensorReading.x, SensorReading.y, SensorReading.value, SensorReading.read_at)
+        .where(*conditions)
+        .order_by(SensorReading.read_at.desc())
+        .limit(limit)
+    )
+    return [
+        SpatialReading(x=row.x, y=row.y, value=row.value, read_at=row.read_at)
+        for row in result.all()
+    ]
 
 
 @router.get("/readings/latest", response_model=list[SensorReadingRead])

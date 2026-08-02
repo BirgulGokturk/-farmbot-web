@@ -1,13 +1,16 @@
 /**
- * Etkileşimli tarla tuvali.
+ * Etkileşimli tarla tuvali (2D).
  *
  * Tasarım kararı: viewBox yerine bir <g> üzerinde translate+scale kullanıyoruz.
- * Böylece ekran ↔ dünya (mm) dönüşümü tek satırlık bir formül oluyor ve
- * viewBox'ın "letterbox" davranışıyla uğraşmak gerekmiyor.
+ * Böylece ekran ↔ dünya (mm) dönüşümü tek satırlık bir formül oluyor.
  *
- * Sürükleme pointer olaylarıyla yazıldı; fare ve dokunmatik aynı kodu kullanır.
- * Paletten bırakma işini üst bileşen yönetir; tuval yalnızca koordinat
- * dönüşümünü ve isabet testini `ref` üzerinden dışa açar.
+ * Etkileşimler:
+ *   * Boş alanı sürükle           → görünümü kaydır
+ *   * Shift + boş alanı sürükle   → kutu ile çoklu seçim
+ *   * Bitkiye bas ve sürükle      → seçili tüm bitkileri birlikte taşı
+ *   * Ctrl/Shift + tıkla          → seçime ekle / çıkar
+ *   * Ctrl + tekerlek             → yakınlaştır (düz tekerlek sayfayı kaydırır)
+ *   * Boş alana çift tıkla        → robotu oraya gönder
  */
 
 import {
@@ -16,6 +19,7 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -23,10 +27,13 @@ import {
 import { Crosshair, Maximize2, Minus, Plus } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import type { Device, Point, Position } from "@/lib/types";
+import { growthAt } from "@/lib/growth";
+import type { Curve, Device, Point, Position, SpatialReading } from "@/lib/types";
 
 const MIN_SCALE = 0.02;
 const MAX_SCALE = 1.5;
+/** Bu mesafeden az sürükleme tıklama sayılır — kazara taşımayı önler. */
+const DRAG_THRESHOLD_PX = 4;
 
 interface View {
   scale: number;
@@ -34,11 +41,14 @@ interface View {
   offsetY: number;
 }
 
-/** Üst bileşenin tuvale imperatif erişimi. */
+export interface PointMove {
+  id: string;
+  x: number;
+  y: number;
+}
+
 export interface GardenCanvasHandle {
-  /** Ekran koordinatını yatak koordinatına (mm) çevirir ve yatağa kırpar. */
   screenToWorld: (clientX: number, clientY: number) => { x: number; y: number };
-  /** Verilen ekran noktası tuvalin üzerinde mi? */
   hitTest: (clientX: number, clientY: number) => boolean;
 }
 
@@ -46,19 +56,34 @@ interface GardenCanvasProps {
   device: Device;
   points: Point[];
   botPosition: Position;
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-  /** Var olan bitki taşındı (sürükleme bittiğinde bir kez çağrılır). */
-  onMovePoint: (id: string, x: number, y: number) => void;
-  /** Boş alana çift tıklandığında robotu oraya gönder. */
+  selectedIds: string[];
+  onSelectionChange: (ids: string[]) => void;
+  /** Sürükleme bittiğinde taşınan tüm noktalar tek seferde bildirilir. */
+  onMovePoints: (moves: PointMove[], previous: PointMove[]) => void;
   onSendBot?: (x: number, y: number) => void;
-  /** Paletten sürükleme sürüyorsa imleç görsel olarak değişsin. */
   dropActive?: boolean;
+  /** Zaman yolculuğu: bitkiler bu tarihteki boyutlarıyla çizilir. */
+  viewDate: Date;
+  curves: Map<string, Curve>;
+  /** Isı haritası ölçümleri; null ise katman kapalı. */
+  heatmap?: SpatialReading[] | null;
 }
 
 export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
   function GardenCanvas(
-    { device, points, botPosition, selectedId, onSelect, onMovePoint, onSendBot, dropActive },
+    {
+      device,
+      points,
+      botPosition,
+      selectedIds,
+      onSelectionChange,
+      onMovePoints,
+      onSendBot,
+      dropActive,
+      viewDate,
+      curves,
+      heatmap,
+    },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -67,12 +92,20 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
     const [size, setSize] = useState({ width: 800, height: 500 });
     const [view, setView] = useState<View>({ scale: 0.1, offsetX: 40, offsetY: 40 });
 
-    /** Sürüklenen noktanın geçici konumu (API'ye henüz yazılmadı). */
-    const [dragging, setDragging] = useState<{
-      id: string;
-      x: number;
-      y: number;
+    /** Sürüklenen noktaların geçici konumları (API'ye henüz yazılmadı). */
+    const [drag, setDrag] = useState<{
+      origin: { x: number; y: number };
+      startPositions: Map<string, { x: number; y: number }>;
+      current: Map<string, { x: number; y: number }>;
       moved: boolean;
+    } | null>(null);
+
+    /** Shift ile çizilen seçim kutusu (dünya koordinatı). */
+    const [marquee, setMarquee] = useState<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
     } | null>(null);
 
     const panRef = useRef<{
@@ -83,12 +116,13 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
     } | null>(null);
     const [panning, setPanning] = useState(false);
 
+    const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+
     // --- Ölçüler --------------------------------------------------------- //
 
     useLayoutEffect(() => {
       const element = containerRef.current;
       if (!element) return;
-
       const observer = new ResizeObserver(([entry]) => {
         const { width, height } = entry.contentRect;
         setSize({ width: Math.max(1, width), height: Math.max(1, height) });
@@ -111,11 +145,6 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
       });
     }, [size.width, size.height, device.bed_width_mm, device.bed_length_mm]);
 
-    /**
-     * Kullanıcı görünümü elle değiştirmediyse, kap her yeniden boyutlandığında
-     * bahçeyi otomatik sığdır. Tek seferlik sığdırma, yerleşim ilk render'da
-     * oturmadığı için yanlış ölçekte kalabiliyordu.
-     */
     const userAdjustedRef = useRef(false);
     useEffect(() => {
       if (!userAdjustedRef.current && size.width > 1) fitToScreen();
@@ -123,7 +152,6 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
 
     // --- Koordinat dönüşümü ---------------------------------------------- //
 
-    // View'i ref'te de tutuyoruz: imperatif API her zaman güncel değeri görsün.
     const viewRef = useRef(view);
     viewRef.current = view;
 
@@ -132,24 +160,43 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
         const rect = svgRef.current?.getBoundingClientRect();
         if (!rect) return { x: 0, y: 0 };
         const current = viewRef.current;
-        const x = (clientX - rect.left - current.offsetX) / current.scale;
-        const y = (clientY - rect.top - current.offsetY) / current.scale;
         return {
-          x: Math.round(Math.max(0, Math.min(device.bed_width_mm, x))),
-          y: Math.round(Math.max(0, Math.min(device.bed_length_mm, y))),
+          x: Math.round(
+            Math.max(
+              0,
+              Math.min(device.bed_width_mm, (clientX - rect.left - current.offsetX) / current.scale),
+            ),
+          ),
+          y: Math.round(
+            Math.max(
+              0,
+              Math.min(
+                device.bed_length_mm,
+                (clientY - rect.top - current.offsetY) / current.scale,
+              ),
+            ),
+          ),
         };
       },
       [device.bed_width_mm, device.bed_length_mm],
     );
 
+    /** Kırpmasız dönüşüm — seçim kutusu yatak dışına taşabilmeli. */
+    const rawWorld = useCallback((clientX: number, clientY: number) => {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return { x: 0, y: 0 };
+      const current = viewRef.current;
+      return {
+        x: (clientX - rect.left - current.offsetX) / current.scale,
+        y: (clientY - rect.top - current.offsetY) / current.scale,
+      };
+    }, []);
+
     const hitTest = useCallback((clientX: number, clientY: number) => {
       const rect = svgRef.current?.getBoundingClientRect();
       if (!rect) return false;
       return (
-        clientX >= rect.left &&
-        clientX <= rect.right &&
-        clientY >= rect.top &&
-        clientY <= rect.bottom
+        clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
       );
     }, []);
 
@@ -164,7 +211,6 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
         const rect = svgRef.current?.getBoundingClientRect();
         if (!rect) return { ...current, scale: next };
 
-        // İmlecin altındaki dünya noktası sabit kalsın
         const screenX = clientX - rect.left;
         const screenY = clientY - rect.top;
         const worldX = (screenX - current.offsetX) / current.scale;
@@ -174,39 +220,59 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
       });
     }, []);
 
-    /**
-     * Tuval sayfanın içine gömülü olduğu için düz tekerlek hareketini YUTMUYORUZ —
-     * yoksa kullanıcı tuvalin üzerindeyken sayfayı kaydıramaz, kazara yakınlaşır.
-     * Yakınlaştırma: Ctrl/⌘ + tekerlek ya da sağ alttaki düğmeler.
-     * preventDefault çağırabilmek için dinleyici passive olmamalı.
-     */
     useEffect(() => {
       const element = svgRef.current;
       if (!element) return;
-
       function onWheel(event: WheelEvent) {
+        // Düz tekerlek sayfayı kaydırsın; tuval yalnızca Ctrl/⌘ ile yakınlaşsın
         if (!event.ctrlKey && !event.metaKey) return;
         event.preventDefault();
         zoomAt(event.clientX, event.clientY, event.deltaY < 0 ? 1.12 : 1 / 1.12);
       }
-
       element.addEventListener("wheel", onWheel, { passive: false });
       return () => element.removeEventListener("wheel", onWheel);
     }, [zoomAt]);
 
-    // --- Sürükleme ve kaydırma -------------------------------------------- //
+    // --- Etkileşimi her zaman pencere düzeyinde bitir ---------------------- //
 
-    // Etkileşimi her zaman pencere düzeyinde bitiriyoruz. Aksi halde işaretçi
-    // tuvalin dışında bırakılırsa pan durumu takılı kalır ve sonraki her
-    // fare hareketi görüntüyü kaydırır.
+    // İşaretçi tuvalin dışında bırakılırsa pan/sürükleme durumu takılı kalmasın
     useEffect(() => {
       function finish() {
         if (panRef.current) {
           panRef.current = null;
           setPanning(false);
         }
-        setDragging((current) => {
-          if (current?.moved) onMovePoint(current.id, current.x, current.y);
+
+        setMarquee((box) => {
+          if (box) {
+            const inside = points
+              .filter((point) => {
+                const x = Math.min(box.x1, box.x2);
+                const y = Math.min(box.y1, box.y2);
+                const w = Math.abs(box.x2 - box.x1);
+                const h = Math.abs(box.y2 - box.y1);
+                return (
+                  point.x >= x && point.x <= x + w && point.y >= y && point.y <= y + h
+                );
+              })
+              .map((point) => point.id);
+            onSelectionChange(inside);
+          }
+          return null;
+        });
+
+        setDrag((current) => {
+          if (current?.moved) {
+            const moves: PointMove[] = [];
+            const previous: PointMove[] = [];
+            for (const [id, position] of current.current) {
+              const start = current.startPositions.get(id);
+              if (!start) continue;
+              moves.push({ id, x: position.x, y: position.y });
+              previous.push({ id, x: start.x, y: start.y });
+            }
+            if (moves.length) onMovePoints(moves, previous);
+          }
           return null;
         });
       }
@@ -217,21 +283,51 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
         window.removeEventListener("pointerup", finish);
         window.removeEventListener("pointercancel", finish);
       };
-    }, [onMovePoint]);
+    }, [points, onMovePoints, onSelectionChange]);
+
+    // --- İşaretçi olayları -------------------------------------------------- //
 
     function handlePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
-      // Sadece birincil düğme kaydırsın (sağ tık menüsü bozulmasın)
       if (event.pointerType === "mouse" && event.button !== 0) return;
 
-      const pointTarget = (event.target as Element).closest("[data-point]");
-      if (pointTarget) {
-        const id = pointTarget.getAttribute("data-point");
-        const point = points.find((p) => p.id === id);
-        if (point) {
-          onSelect(point.id);
-          setDragging({ id: point.id, x: point.x, y: point.y, moved: false });
-          return;
+      const target = (event.target as Element).closest("[data-point]");
+      const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+
+      if (target) {
+        const id = target.getAttribute("data-point")!;
+        // Seçili olmayan bir bitkiye basıldıysa seçim ona geçsin;
+        // seçili bir bitkiye basıldıysa grup korunsun (grup taşıma için şart)
+        let nextSelection = selectedIds;
+        if (additive) {
+          nextSelection = selected.has(id)
+            ? selectedIds.filter((item) => item !== id)
+            : [...selectedIds, id];
+          onSelectionChange(nextSelection);
+          return; // ekle/çıkar sırasında taşıma başlatma
         }
+        if (!selected.has(id)) {
+          nextSelection = [id];
+          onSelectionChange(nextSelection);
+        }
+
+        const moving = new Map<string, { x: number; y: number }>();
+        for (const point of points) {
+          if (nextSelection.includes(point.id)) moving.set(point.id, { x: point.x, y: point.y });
+        }
+        setDrag({
+          origin: { x: event.clientX, y: event.clientY },
+          startPositions: moving,
+          current: new Map(moving),
+          moved: false,
+        });
+        return;
+      }
+
+      // Boş alan: Shift ile seçim kutusu, aksi halde kaydırma
+      if (event.shiftKey) {
+        const world = rawWorld(event.clientX, event.clientY);
+        setMarquee({ x1: world.x, y1: world.y, x2: world.x, y2: world.y });
+        return;
       }
 
       userAdjustedRef.current = true;
@@ -242,13 +338,34 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
         offsetY: view.offsetY,
       };
       setPanning(true);
-      onSelect(null);
+      if (selectedIds.length) onSelectionChange([]);
     }
 
     function handlePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
-      if (dragging) {
-        const { x, y } = screenToWorld(event.clientX, event.clientY);
-        setDragging((current) => (current ? { ...current, x, y, moved: true } : null));
+      if (drag) {
+        const distance = Math.hypot(
+          event.clientX - drag.origin.x,
+          event.clientY - drag.origin.y,
+        );
+        if (!drag.moved && distance < DRAG_THRESHOLD_PX) return;
+
+        const deltaX = (event.clientX - drag.origin.x) / view.scale;
+        const deltaY = (event.clientY - drag.origin.y) / view.scale;
+
+        const next = new Map<string, { x: number; y: number }>();
+        for (const [id, start] of drag.startPositions) {
+          next.set(id, {
+            x: Math.round(Math.max(0, Math.min(device.bed_width_mm, start.x + deltaX))),
+            y: Math.round(Math.max(0, Math.min(device.bed_length_mm, start.y + deltaY))),
+          });
+        }
+        setDrag({ ...drag, current: next, moved: true });
+        return;
+      }
+
+      if (marquee) {
+        const world = rawWorld(event.clientX, event.clientY);
+        setMarquee({ ...marquee, x2: world.x, y2: world.y });
         return;
       }
 
@@ -267,6 +384,16 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
     const verticalLines = countLines(device.bed_width_mm, gridStep);
     const horizontalLines = countLines(device.bed_length_mm, gridStep);
 
+    /** Zaman yolculuğu: her bitkinin o tarihteki hali önceden hesaplanır. */
+    const rendered = useMemo(
+      () =>
+        points.map((point) => ({
+          point,
+          growth: growthAt(point, viewDate, curves),
+        })),
+      [points, viewDate, curves],
+    );
+
     return (
       <div
         ref={containerRef}
@@ -278,7 +405,13 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
           height={size.height}
           className={cn(
             "block touch-none select-none",
-            panning ? "cursor-grabbing" : dropActive ? "cursor-copy" : "cursor-grab",
+            panning
+              ? "cursor-grabbing"
+              : dropActive
+                ? "cursor-copy"
+                : marquee
+                  ? "cursor-crosshair"
+                  : "cursor-grab",
           )}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
@@ -293,10 +426,13 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
               <stop offset="0%" stopColor="var(--brand)" stopOpacity="0.09" />
               <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.05" />
             </linearGradient>
+            {/* Isı haritası noktalarını birbirine karıştıran bulanıklık */}
+            <filter id="heat-blur" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation={220} />
+            </filter>
           </defs>
 
           <g transform={`translate(${view.offsetX} ${view.offsetY}) scale(${view.scale})`}>
-            {/* Yatak */}
             <rect
               x="0"
               y="0"
@@ -308,7 +444,21 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
               strokeWidth={3 / view.scale}
             />
 
-            {/* Izgara */}
+            {/* Isı haritası — yataktan taşmasın diye kırpma uygulanır */}
+            {heatmap && heatmap.length > 0 && (
+              <g opacity="0.55" filter="url(#heat-blur)">
+                {bucketReadings(heatmap).map((cell, index) => (
+                  <circle
+                    key={index}
+                    cx={cell.x}
+                    cy={cell.y}
+                    r={340}
+                    fill={heatColor(cell.value)}
+                  />
+                ))}
+              </g>
+            )}
+
             <g stroke="var(--border)" strokeWidth={1 / view.scale} opacity="0.7">
               {verticalLines.map((x) => (
                 <line key={`v${x}`} x1={x} y1={0} x2={x} y2={device.bed_length_mm} />
@@ -319,34 +469,37 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
             </g>
 
             {/* Noktalar */}
-            {points.map((point) => {
-              const isDragging = dragging?.id === point.id;
-              const x = isDragging ? dragging.x : point.x;
-              const y = isDragging ? dragging.y : point.y;
+            {rendered.map(({ point, growth }) => {
+              const dragged = drag?.current.get(point.id);
+              const x = dragged?.x ?? point.x;
+              const y = dragged?.y ?? point.y;
               const color = point.species?.color ?? tintFor(point.point_type);
-              const selected = selectedId === point.id;
+              const isSelected = selected.has(point.id);
+              const radius = growth.radiusMm;
 
               return (
                 <g
                   key={point.id}
                   data-point={point.id}
                   transform={`translate(${x} ${y})`}
-                  className={cn("cursor-move", isDragging && "opacity-80")}
+                  className="cursor-move"
+                  opacity={growth.present ? (dragged ? 0.8 : 1) : 0.25}
                 >
-                  {/* Yayılma alanı */}
                   <circle
-                    r={point.radius_mm}
+                    r={radius}
                     fill={color}
-                    fillOpacity={selected ? 0.32 : 0.18}
+                    fillOpacity={isSelected ? 0.32 : 0.18}
                     stroke={color}
                     strokeWidth={2 / view.scale}
                     strokeDasharray={
-                      point.stage === "planned" ? `${8 / view.scale} ${6 / view.scale}` : undefined
+                      growth.stage === "planned" || !growth.present
+                        ? `${8 / view.scale} ${6 / view.scale}`
+                        : undefined
                     }
                   />
-                  {selected && (
+                  {isSelected && (
                     <circle
-                      r={point.radius_mm + 18 / view.scale}
+                      r={radius + 18 / view.scale}
                       fill="none"
                       stroke="var(--brand)"
                       strokeWidth={3 / view.scale}
@@ -355,7 +508,7 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
                   <circle r={Math.max(10, 9 / view.scale)} fill={color} />
                   {view.scale > 0.12 && (
                     <text
-                      y={point.radius_mm + 34 / view.scale}
+                      y={radius + 34 / view.scale}
                       textAnchor="middle"
                       fill="var(--text-muted)"
                       fontSize={13 / view.scale}
@@ -367,6 +520,22 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
                 </g>
               );
             })}
+
+            {/* Seçim kutusu */}
+            {marquee && (
+              <rect
+                x={Math.min(marquee.x1, marquee.x2)}
+                y={Math.min(marquee.y1, marquee.y2)}
+                width={Math.abs(marquee.x2 - marquee.x1)}
+                height={Math.abs(marquee.y2 - marquee.y1)}
+                fill="var(--brand)"
+                fillOpacity="0.12"
+                stroke="var(--brand)"
+                strokeWidth={2 / view.scale}
+                strokeDasharray={`${10 / view.scale} ${6 / view.scale}`}
+                className="pointer-events-none"
+              />
+            )}
 
             {/* Robotun anlık konumu */}
             <g className="pointer-events-none">
@@ -407,7 +576,6 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
           </g>
         </svg>
 
-        {/* Yakınlaştırma araçları */}
         <div className="absolute bottom-4 right-4 flex flex-col gap-1.5">
           <CanvasButton
             label="Yakınlaştır"
@@ -438,17 +606,21 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
           </CanvasButton>
         </div>
 
-        {/* Ölçek göstergesi */}
         <div className="pointer-events-none absolute bottom-4 left-4 flex items-center gap-2 rounded-lg glass px-2.5 py-1.5 text-xs text-muted">
           <Crosshair className="size-3.5" />
           <span className="font-mono">{Math.round(view.scale * 1000) / 10}×</span>
           <span className="text-subtle">· ızgara {gridStep} mm</span>
+          {selectedIds.length > 1 && (
+            <span className="text-brand">· {selectedIds.length} seçili</span>
+          )}
         </div>
       </div>
     );
   },
 );
 
+// --------------------------------------------------------------------------- //
+// Yardımcılar
 // --------------------------------------------------------------------------- //
 
 function CanvasButton({
@@ -494,4 +666,41 @@ function centerOf(ref: React.RefObject<SVGSVGElement | null>) {
   const rect = ref.current?.getBoundingClientRect();
   if (!rect) return { x: 0, y: 0 };
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+}
+
+/**
+ * Ölçümleri ızgara hücrelerine toplar.
+ * Yüzlerce daireyi tek tek çizmek yerine hücre ortalaması almak hem
+ * performansı korur hem de haritayı okunur kılar.
+ */
+function bucketReadings(readings: SpatialReading[], cellSize = 400) {
+  const cells = new Map<string, { x: number; y: number; total: number; count: number }>();
+
+  for (const reading of readings) {
+    const cellX = Math.floor(reading.x / cellSize);
+    const cellY = Math.floor(reading.y / cellSize);
+    const key = `${cellX}:${cellY}`;
+    const cell = cells.get(key) ?? {
+      x: cellX * cellSize + cellSize / 2,
+      y: cellY * cellSize + cellSize / 2,
+      total: 0,
+      count: 0,
+    };
+    cell.total += reading.value;
+    cell.count += 1;
+    cells.set(key, cell);
+  }
+
+  return [...cells.values()].map((cell) => ({
+    x: cell.x,
+    y: cell.y,
+    value: cell.total / cell.count,
+  }));
+}
+
+/** Kuru (düşük) → sıcak kırmızı, nemli (yüksek) → serin mavi. */
+function heatColor(value: number): string {
+  const t = Math.max(0, Math.min(1, value / 100));
+  const hue = 8 + t * 200; // 8° kırmızı → 208° mavi
+  return `hsl(${hue} 85% 55%)`;
 }

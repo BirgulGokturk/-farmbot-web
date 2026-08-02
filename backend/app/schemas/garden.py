@@ -103,6 +103,11 @@ class PointRead(ORMModel):
     planted_at: datetime | None
     depth_mm: int | None
 
+    # Zaman yolculuğu bu eğrileri kullanarak bitkinin o tarihteki boyutunu çizer
+    water_curve_id: uuid.UUID | None
+    spread_curve_id: uuid.UUID | None
+    height_curve_id: uuid.UUID | None
+
     tool_id: uuid.UUID | None
     pullout_direction: int
     gantry_mounted: bool
@@ -135,6 +140,13 @@ class CurveCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     curve_type: CurveType
     data: dict[str, float] = Field(default_factory=dict)
+
+
+class CurveUpdate(BaseModel):
+    """Eğri editörü yalnızca değişen alanı gönderir."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    data: dict[str, float] | None = None
 
 
 class CurveRead(ORMModel):

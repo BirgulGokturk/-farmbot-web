@@ -143,6 +143,11 @@ export interface Point {
   planted_at: string | null;
   depth_mm: number | null;
 
+  /** Zaman yolculuğu bu eğrilerle bitkinin o tarihteki boyutunu hesaplar */
+  water_curve_id: string | null;
+  spread_curve_id: string | null;
+  height_curve_id: string | null;
+
   tool_id: string | null;
   pullout_direction: number;
   gantry_mounted: boolean;
@@ -185,6 +190,18 @@ export interface Tool {
   created_at: string;
 }
 
+export type CurveType = "water" | "spread" | "height";
+
+export interface Curve {
+  id: string;
+  device_id: string;
+  name: string;
+  curve_type: CurveType;
+  /** {gün: değer} — ör. {"1": 50, "30": 400} */
+  data: Record<string, number>;
+  created_at: string;
+}
+
 // --------------------------------------------------------------------------- //
 // Donanım
 // --------------------------------------------------------------------------- //
@@ -219,6 +236,14 @@ export interface SensorReading {
   x: number | null;
   y: number | null;
   z: number | null;
+  read_at: string;
+}
+
+/** Isı haritası için konumlu ölçüm. */
+export interface SpatialReading {
+  x: number;
+  y: number;
+  value: number;
   read_at: string;
 }
 
@@ -313,6 +338,57 @@ export interface Page<T> {
   total: number;
   limit: number;
   offset: number;
+}
+
+// --------------------------------------------------------------------------- //
+// Uyarılar ve bildirimler
+// --------------------------------------------------------------------------- //
+
+export type AlertKind = "sensor_threshold" | "device_offline";
+export type AlertComparison = "below" | "above";
+
+export interface AlertRule {
+  id: string;
+  device_id: string;
+  name: string;
+  kind: AlertKind;
+  enabled: boolean;
+  level: LogLevel;
+  sensor_id: string | null;
+  comparison: AlertComparison;
+  threshold: number | null;
+  offline_minutes: number;
+  cooldown_minutes: number;
+  last_triggered_at: string | null;
+  created_at: string;
+}
+
+export interface AlertRuleInput {
+  name: string;
+  kind?: AlertKind;
+  enabled?: boolean;
+  level?: LogLevel;
+  sensor_id?: string | null;
+  comparison?: AlertComparison;
+  threshold?: number | null;
+  offline_minutes?: number;
+  cooldown_minutes?: number;
+}
+
+export interface AppNotification {
+  id: number;
+  device_id: string;
+  rule_id: string | null;
+  title: string;
+  message: string;
+  level: LogLevel;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationSummary {
+  unread: number;
+  items: AppNotification[];
 }
 
 export interface CommandResponse {

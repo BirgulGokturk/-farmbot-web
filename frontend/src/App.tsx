@@ -16,6 +16,7 @@ const Sensors = lazy(() => import("@/pages/Sensors"));
 const CameraPage = lazy(() => import("@/pages/CameraPage"));
 const Sequences = lazy(() => import("@/pages/Sequences"));
 const Plants = lazy(() => import("@/pages/Plants"));
+const Curves = lazy(() => import("@/pages/Curves"));
 const Schedule = lazy(() => import("@/pages/Schedule"));
 const Logs = lazy(() => import("@/pages/Logs"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="sequences" element={<Sequences />} />
           <Route path="designer" element={<Designer />} />
           <Route path="plants" element={<Plants />} />
+          <Route path="curves" element={<Curves />} />
           <Route path="schedule" element={<Schedule />} />
           <Route path="logs" element={<Logs />} />
           <Route path="settings" element={<SettingsPage />} />
