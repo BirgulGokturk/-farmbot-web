@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     MEDIA_ROOT: str = "./media"
     MEDIA_URL_PREFIX: str = "/media"
 
+    # --- Simülatör ---
+    # Gerçek robot bağlı değilken paneli canlı tutan sanal FarmBot.
+    # MQTT bağlantısı kurulduğunda otomatik olarak devre dışı kalır.
+    SIMULATOR_ENABLED: bool = True
+
+    # --- Uyarılar ---
+    # Cihaz bu süre boyunca haber vermezse "çevrimdışı" uyarısı üretilir
+    DEVICE_OFFLINE_AFTER_SECONDS: int = 300
+
     # --- Demo veri ---
     SEED_DEMO_DATA: bool = True
 

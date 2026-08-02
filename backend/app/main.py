@@ -47,9 +47,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await bridge.start()
 
+    from app.services.alerts import watcher
+
+    await watcher.start()
+
+    if settings.SIMULATOR_ENABLED:
+        logger.info(
+            "Simülatör etkin — gerçek robot bağlanana kadar komutlar sanal robota gider"
+        )
+
     yield
 
     await bridge.stop()
+    await watcher.stop()
+
+    from app.services.simulator import simulator
+
+    await simulator.stop_all()
     logger.info("Kapatıldı")
 
 
@@ -96,12 +110,17 @@ async def root() -> dict[str, str]:
 @app.get("/health", tags=["Sistem"])
 async def health() -> dict[str, object]:
     """Bulut sağlayıcılarının sağlık kontrolü için."""
+    from app.services import gateway
     from app.services.realtime import hub
+    from app.services.simulator import simulator
 
     return {
         "status": "ok",
         "environment": settings.ENVIRONMENT,
+        # Komutların şu anda hangi yoldan gittiği: mqtt | simulator | none
+        "transport": gateway.active_transport().value,
         "mqtt_connected": bridge.connected,
+        "simulated_robots": simulator.active_count,
         "tracked_devices": len(hub.known_devices()),
     }
 

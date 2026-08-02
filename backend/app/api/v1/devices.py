@@ -9,7 +9,7 @@ from app.api.deps import CurrentUser, DbSession, OwnedDevice
 from app.models import Device
 from app.schemas.common import Message
 from app.schemas.device import DeviceCreate, DeviceRead, DeviceStatusRead, DeviceUpdate
-from app.services.mqtt import bridge
+from app.services import gateway
 from app.services.realtime import hub
 
 router = APIRouter(prefix="/devices", tags=["Cihazlar"])
@@ -63,9 +63,12 @@ async def device_status(device: OwnedDevice) -> DeviceStatusRead:
     Sürekli izleme için WebSocket (`/api/v1/ws/devices/{id}`) tercih edilmelidir;
     bu uç nokta ilk yükleme ve WebSocket desteklemeyen istemciler içindir.
     """
+    # Simülatör modundaysa cihazın sanal robotu ilk sorguda ayağa kalksın
+    await gateway.ensure_started(device)
+
     state = hub.state(str(device.id))
 
-    # Henüz MQTT'den durum gelmediyse veritabanındaki son bilinen değerleri kullan
+    # Henüz robottan durum gelmediyse veritabanındaki son bilinen değerleri kullan
     if state.last_seen_at is None:
         state.position = {"x": device.last_x, "y": device.last_y, "z": device.last_z}
         state.locked = device.is_locked
@@ -80,7 +83,8 @@ async def request_sync(device: OwnedDevice) -> Message:
     """Robottan durum ağacını yeniden yayınlamasını iste."""
     from app.services import commands
 
-    if not bridge.connected:
-        return Message(detail="MQTT broker'a bağlı değil")
-    await bridge.send_rpc(str(device.id), [commands.read_status()], wait_for_response=False)
+    try:
+        await gateway.send(device, [commands.read_status()], wait=False)
+    except ConnectionError as exc:
+        return Message(detail=str(exc))
     return Message(detail="Durum isteği gönderildi")

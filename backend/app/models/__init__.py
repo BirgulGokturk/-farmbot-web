@@ -5,6 +5,7 @@ her model bu dosyadan içe aktarılmalıdır.
 """
 
 from app.db.base import Base
+from app.models.alerts import AlertRule, Notification
 from app.models.automation import (
     FarmEvent,
     PointGroup,

@@ -12,6 +12,9 @@ databases:
     databaseName: farmbot
     user: farmbot
     plan: free
+    # ÖNEMLİ: API ile aynı bölgede olmalı. Render'da farklı bölgelerdeki
+    # servisler dahili bağlantı adresiyle birbirine erişemez.
+    region: frankfurt
 
 services:
   # --------------------------------------------------------------------- #

@@ -130,6 +130,16 @@ async def create_reading(
             },
         },
     )
+
+    # Eşik kuralları yeni değere göre değerlendirilsin.
+    # Uyarı sistemindeki bir hata ölçüm kaydını geçersiz kılmamalı.
+    import contextlib
+
+    from app.services.alerts import evaluate_device_alerts
+
+    with contextlib.suppress(Exception):
+        await evaluate_device_alerts(device.id)
+
     return reading
 
 

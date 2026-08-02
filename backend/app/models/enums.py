@@ -83,6 +83,18 @@ class Axis(str, Enum):
     ALL = "all"
 
 
+class AlertKind(str, Enum):
+    """Uyarı kuralının türü."""
+
+    SENSOR_THRESHOLD = "sensor_threshold"
+    DEVICE_OFFLINE = "device_offline"
+
+
+class AlertComparison(str, Enum):
+    BELOW = "below"
+    ABOVE = "above"
+
+
 class SyncStatus(str, Enum):
     """Robotun backend ile senkronizasyon durumu."""
 

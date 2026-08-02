@@ -1,6 +1,7 @@
 """Manuel kontrol — jog pad, ev, pinler, sulama, acil durdurma.
 
-Her uç nokta CeleryScript komutunu üretip MQTT köprüsüne verir.
+Her uç nokta CeleryScript komutunu üretip robot geçidine verir; geçit komutu
+gerçek robota (MQTT) ya da simülatöre yönlendirir.
 Hareket içeren komutlar, acil durdurma kilidi açıkken reddedilir.
 """
 
@@ -12,7 +13,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DbSession, OwnedDevice, ensure_unlocked
-from app.models import Point, Tool
+from app.models import Device, Point, Tool
 from app.schemas.control import (
     CommandResponse,
     ExecuteSequenceRequest,
@@ -24,30 +25,26 @@ from app.schemas.control import (
     RawCommandRequest,
     WaterPointRequest,
 )
-from app.services import commands
-from app.services.mqtt import RpcError, RpcTimeoutError, bridge
+from app.services import commands, gateway
+from app.services.mqtt import RpcError, RpcTimeoutError
 
 router = APIRouter(prefix="/devices/{device_id}/control", tags=["Kontrol"])
 
 
 async def _dispatch(
-    device_id: uuid.UUID,
+    device: Device,
     body: list[dict],
     *,
     wait: bool = True,
     priority: int = commands.DEFAULT_PRIORITY,
 ) -> CommandResponse:
-    """Komutu robota gönderir ve hataları anlaşılır HTTP yanıtlarına çevirir."""
-    if not bridge.connected:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Robot haberleşme sunucusuna (MQTT) bağlanılamıyor",
-        )
+    """Komutu robot geçidine verir ve hataları anlaşılır HTTP yanıtlarına çevirir.
 
+    Geçit, gerçek robot (MQTT) ile sanal robot (simülatör) arasında seçim yapar;
+    bu katmanın hangisinin çalıştığını bilmesi gerekmez.
+    """
     try:
-        response = await bridge.send_rpc(
-            str(device_id), body, priority=priority, wait_for_response=wait
-        )
+        response = await gateway.send(device, body, wait=wait, priority=priority)
     except RpcTimeoutError as exc:
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)) from exc
     except RpcError as exc:
@@ -71,7 +68,7 @@ async def move_relative(payload: MoveRelativeRequest, device: OwnedDevice) -> Co
     """Jog pad butonları bunu çağırır."""
     ensure_unlocked(device)
     return await _dispatch(
-        device.id,
+        device,
         [commands.move_relative(payload.x, payload.y, payload.z, payload.speed)],
     )
 
@@ -81,7 +78,7 @@ async def move_absolute(payload: MoveAbsoluteRequest, device: OwnedDevice) -> Co
     ensure_unlocked(device)
     _assert_reachable(device, payload.x, payload.y)
     return await _dispatch(
-        device.id,
+        device,
         [commands.move_absolute(payload.x, payload.y, payload.z, payload.speed)],
     )
 
@@ -95,19 +92,19 @@ async def go_home(payload: HomeRequest, device: OwnedDevice) -> CommandResponse:
         else commands.home(payload.axis.value, payload.speed)
     )
     # Ev arama uzun sürebilir; arayüzü bekletmeden gönder
-    return await _dispatch(device.id, [step], wait=not payload.find)
+    return await _dispatch(device, [step], wait=not payload.find)
 
 
 @router.post("/calibrate", response_model=CommandResponse)
 async def calibrate(payload: HomeRequest, device: OwnedDevice) -> CommandResponse:
     ensure_unlocked(device)
-    return await _dispatch(device.id, [commands.calibrate(payload.axis.value)], wait=False)
+    return await _dispatch(device, [commands.calibrate(payload.axis.value)], wait=False)
 
 
 @router.post("/set-zero", response_model=CommandResponse)
 async def set_zero(payload: HomeRequest, device: OwnedDevice) -> CommandResponse:
     ensure_unlocked(device)
-    return await _dispatch(device.id, [commands.set_zero(payload.axis.value)])
+    return await _dispatch(device, [commands.set_zero(payload.axis.value)])
 
 
 # --------------------------------------------------------------------------- #
@@ -119,13 +116,13 @@ async def write_pin(payload: PinWriteRequest, device: OwnedDevice) -> CommandRes
     """Pompa/vana/lamba aç-kapa. Kilit hareketi engeller ama pin yazmayı engellemez —
     acil durumda suyu kapatabilmek gerekir."""
     return await _dispatch(
-        device.id, [commands.write_pin(payload.pin, payload.value, payload.mode)]
+        device, [commands.write_pin(payload.pin, payload.value, payload.mode)]
     )
 
 
 @router.post("/pin/read", response_model=CommandResponse)
 async def read_pin(payload: PinReadRequest, device: OwnedDevice) -> CommandResponse:
-    return await _dispatch(device.id, [commands.read_pin(payload.pin, payload.mode)])
+    return await _dispatch(device, [commands.read_pin(payload.pin, payload.mode)])
 
 
 # --------------------------------------------------------------------------- #
@@ -166,7 +163,7 @@ async def water_point(
         safe_z=device.safe_height_mm,
     )
     # Sulama uzun sürer; yanıtı bekleme, ilerleme WebSocket'ten izlenir
-    return await _dispatch(device.id, body, wait=False)
+    return await _dispatch(device, body, wait=False)
 
 
 async def _duration_from_volume(db: DbSession, device_id: uuid.UUID, volume_ml: int) -> int:
@@ -189,7 +186,7 @@ async def _duration_from_volume(db: DbSession, device_id: uuid.UUID, volume_ml: 
 
 @router.post("/take-photo", response_model=CommandResponse)
 async def take_photo(device: OwnedDevice) -> CommandResponse:
-    return await _dispatch(device.id, [commands.take_photo()], wait=False)
+    return await _dispatch(device, [commands.take_photo()], wait=False)
 
 
 @router.post("/emergency-lock", response_model=CommandResponse)
@@ -198,7 +195,7 @@ async def emergency_lock(device: OwnedDevice, db: DbSession) -> CommandResponse:
     device.is_locked = True
     await db.commit()
     return await _dispatch(
-        device.id,
+        device,
         [commands.emergency_lock()],
         wait=False,
         priority=commands.EMERGENCY_PRIORITY,
@@ -210,7 +207,7 @@ async def emergency_unlock(device: OwnedDevice, db: DbSession) -> CommandRespons
     device.is_locked = False
     await db.commit()
     return await _dispatch(
-        device.id,
+        device,
         [commands.emergency_unlock()],
         wait=False,
         priority=commands.EMERGENCY_PRIORITY,
@@ -219,7 +216,7 @@ async def emergency_unlock(device: OwnedDevice, db: DbSession) -> CommandRespons
 
 @router.post("/reboot", response_model=CommandResponse)
 async def reboot(device: OwnedDevice) -> CommandResponse:
-    return await _dispatch(device.id, [commands.reboot()], wait=False)
+    return await _dispatch(device, [commands.reboot()], wait=False)
 
 
 @router.post("/execute", response_model=CommandResponse)
@@ -228,7 +225,7 @@ async def execute_sequence(
 ) -> CommandResponse:
     ensure_unlocked(device)
     return await _dispatch(
-        device.id, [commands.execute_sequence(payload.sequence_id)], wait=False
+        device, [commands.execute_sequence(payload.sequence_id)], wait=False
     )
 
 
@@ -236,7 +233,7 @@ async def execute_sequence(
 async def raw_command(payload: RawCommandRequest, device: OwnedDevice) -> CommandResponse:
     """Dizi editöründe "şimdi çalıştır" önizlemesi için ham CeleryScript."""
     ensure_unlocked(device)
-    return await _dispatch(device.id, payload.body, wait=payload.wait_for_response)
+    return await _dispatch(device, payload.body, wait=payload.wait_for_response)
 
 
 def _assert_reachable(device, x: float, y: float) -> None:
