@@ -20,13 +20,19 @@ COPY . .
 
 RUN mkdir -p /app/media
 
+# Windows'ta düzenlenmiş olma ihtimaline karşı CRLF'i temizle, sonra çalıştırılabilir yap
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
 # Kök olmayan kullanıcı — konteyner güvenliği
 RUN useradd --create-home --uid 1000 farmbot && chown -R farmbot:farmbot /app
 USER farmbot
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://localhost:8000/health || exit 1
+# Bulut sağlayıcıları dinlenecek portu PORT ortam değişkeniyle bildirir
+ENV PORT=8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS "http://localhost:${PORT}/health" || exit 1
+
+CMD ["/app/entrypoint.sh"]

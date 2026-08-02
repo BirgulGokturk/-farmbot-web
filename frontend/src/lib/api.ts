@@ -28,7 +28,26 @@ import type {
   User,
 } from "./types";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "/api/v1";
+/**
+ * API kök adresini çözer.
+ *
+ * Boşsa aynı origin kullanılır (geliştirmede Vite vekili, Docker'da nginx).
+ * Bulut sağlayıcıları (Render Blueprint gibi) servis adresini şemasız,
+ * sadece "farmbot-api.onrender.com" biçiminde verebildiği için eksik şemayı
+ * ve `/api/v1` son ekini burada tamamlıyoruz — böylece dağıtımda tek bir
+ * VITE_API_URL yeterli oluyor.
+ */
+function resolveApiBase(): string {
+  const raw = import.meta.env.VITE_API_URL?.trim();
+  if (!raw) return "/api/v1";
+
+  let base = raw.replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
+  if (!base.endsWith("/api/v1")) base = `${base}/api/v1`;
+  return base;
+}
+
+export const API_BASE = resolveApiBase();
 
 const ACCESS_KEY = "farmbot-access-token";
 const REFRESH_KEY = "farmbot-refresh-token";

@@ -6,7 +6,7 @@
  */
 
 import type { SocketMessage } from "./types";
-import { tokenStore } from "./api";
+import { API_BASE, tokenStore } from "./api";
 
 type Listener = (message: SocketMessage) => void;
 type StateListener = (connected: boolean) => void;
@@ -14,16 +14,20 @@ type StateListener = (connected: boolean) => void;
 const MAX_BACKOFF_MS = 20_000;
 const HEARTBEAT_MS = 20_000;
 
+/**
+ * WebSocket adresini REST kök adresinden türetir — ayrı bir ortam değişkeni
+ * tutmaya gerek kalmaz, ikisi hiçbir zaman birbirinden ayrı düşmez.
+ * http → ws, https → wss.
+ */
 function socketUrl(deviceId: string): string {
   const token = tokenStore.access ?? "";
-  const explicit = import.meta.env.VITE_WS_URL;
 
-  if (explicit) {
-    return `${explicit}/devices/${deviceId}?token=${encodeURIComponent(token)}`;
-  }
-  // Aynı origin üzerinden: http → ws, https → wss
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/api/v1/ws/devices/${deviceId}?token=${encodeURIComponent(token)}`;
+  const absolute = /^https?:\/\//i.test(API_BASE)
+    ? API_BASE
+    : `${window.location.origin}${API_BASE}`;
+
+  const wsBase = absolute.replace(/^http/i, "ws");
+  return `${wsBase}/ws/devices/${deviceId}?token=${encodeURIComponent(token)}`;
 }
 
 export class DeviceSocket {

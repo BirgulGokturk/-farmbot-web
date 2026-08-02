@@ -1,0 +1,8 @@
+# Kabuk betikleri Linux konteynerlerinde çalışır; CRLF satır sonu
+# "bad interpreter" hatası verir. Depoda ve çalışma kopyasında LF zorla.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.conf text eol=lf
+
+# Diğer metin dosyalarında satır sonunu Git'e bırak
+* text=auto

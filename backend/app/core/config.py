@@ -59,9 +59,40 @@ class Settings(BaseSettings):
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _split_origins(cls, v: object) -> object:
-        """CORS_ORIGINS="http://a.com,http://b.com" biçimini listeye çevirir."""
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        """Virgülle ayrılmış listeyi böler ve şeması eksik adresleri tamamlar.
+
+        Bulut sağlayıcıları (ör. Render Blueprint) servis adresini şemasız,
+        sadece "app.onrender.com" biçiminde verir; CORS eşleşmesi için başına
+        https:// koymak gerekir.
+        """
+        items = (
+            [origin.strip() for origin in v.split(",")] if isinstance(v, str) else list(v or [])  # type: ignore[arg-type]
+        )
+        normalized: list[str] = []
+        for origin in items:
+            if not origin:
+                continue
+            if "://" not in origin:
+                origin = f"https://{origin}"
+            normalized.append(origin.rstrip("/"))
+        return normalized
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def _use_async_driver(cls, v: object) -> object:
+        """Sağlayıcıların verdiği senkron URL'yi async sürücüye çevirir.
+
+        Render/Heroku `postgres://…` ya da `postgresql://…` verir; SQLAlchemy'nin
+        async motoru `postgresql+asyncpg://…` bekler. Elle düzeltmeyi unutmak
+        dağıtımda "sürücü bulunamadı" hatasına yol açtığı için burada normalize
+        ediyoruz.
+        """
+        if not isinstance(v, str):
+            return v
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        if v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
         return v
 
     @property

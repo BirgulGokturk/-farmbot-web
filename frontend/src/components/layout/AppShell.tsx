@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useBot } from "@/store/useBot";
 import { Spinner } from "@/components/ui/primitives";
+import SetupDevice from "@/pages/SetupDevice";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { MobileNav } from "./MobileNav";
 import { Sidebar } from "./Sidebar";
@@ -46,6 +47,11 @@ export function AppShell() {
         </div>
       </div>
     );
+  }
+
+  // Yeni bir hesabın hiç robotu yoktur; panel yerine kurulum ekranı gösterilir
+  if (!activeDevice) {
+    return <SetupDevice />;
   }
 
   return (

@@ -1,17 +1,118 @@
-# Dağıtım (Deployment)
+# Canlıya Alma (Deployment)
 
-Uygulama üç parçadan oluşur ve hepsi bulutta çalışabilir:
-
-| Parça | Ne yapar | Önerilen ev sahibi |
-|---|---|---|
-| **Backend** | REST + WebSocket API | Render / Fly.io / Railway |
-| **PostgreSQL** | Kalıcı veri | Render Postgres / Neon / Supabase |
-| **MQTT broker** | Robot haberleşmesi | HiveMQ Cloud / EMQX Cloud / kendi Mosquitto'nuz |
-| **Frontend** | Statik site | Vercel / Netlify / Cloudflare Pages |
+Hedef: internetten erişilebilen, telefondan da açılabilen canlı bir HMI.
+Robot henüz hazır olmadığı için **MQTT kapalı** başlar; donanım geldiğinde tek
+bir ayarla açılır.
 
 ---
 
-## 1. Yerelde Docker ile
+## En hızlı yol: Render Blueprint (önerilen)
+
+Depodaki [`render.yaml`](../render.yaml) tüm yığını tek dosyadan kurar:
+**PostgreSQL + API + statik HMI**. Adresler, veritabanı bağlantısı ve gizli
+anahtar otomatik bağlanır — elle girilecek hiçbir değer yok.
+
+### 1. Depoyu GitHub'a yükleyin
+
+```bash
+git remote add origin https://github.com/<kullanici>/farmbot-web.git
+git push -u origin main
+```
+
+> Depo **özel (private)** olabilir; Render özel depolara da erişebilir.
+
+### 2. Render'da Blueprint'i çalıştırın
+
+1. [render.com](https://render.com) → ücretsiz hesap açın (GitHub ile giriş en kolayı)
+2. **New → Blueprint**
+3. `farmbot-web` deposunu seçin
+4. Render `render.yaml`'ı okur ve üç servisi listeler → **Apply**
+
+İlk kurulum 5–10 dakika sürer (Docker imajı derlenir).
+
+### 3. Sonuç
+
+| Servis | Adres |
+|---|---|
+| **HMI (panel)** | `https://farmbot-hmi.onrender.com` |
+| API | `https://farmbot-api.onrender.com` |
+| API dokümanı | `https://farmbot-api.onrender.com/docs` |
+
+Panele girip **kayıt olun** — ilk girişte robotunuzu tanımlayan kurulum ekranı
+karşılar. Robot henüz kurulu olmasa da tarla tasarımını, sulama takvimini ve
+bitki kütüphanesini şimdiden hazırlayabilirsiniz.
+
+### Ücretsiz katman hakkında
+
+- Web servisi 15 dakika işlem görmezse uykuya geçer; sonraki istek ~30 saniye
+  gecikmeyle uyandırır. Panel açık kaldığı sürece uyumaz.
+- Ücretsiz PostgreSQL 90 gün sonra sona erer. Kalıcı kullanım için veritabanını
+  ücretli katmana (aylık birkaç dolar) yükseltin ya da Neon/Supabase gibi
+  kalıcı ücretsiz bir Postgres'e `DATABASE_URL` ile bağlanın.
+
+---
+
+## Robot hazır olduğunda: MQTT'yi açma
+
+Mekanik ve elektrik tamamlanınca:
+
+1. Bir MQTT broker edinin — **HiveMQ Cloud** ücretsiz katmanı yeterlidir.
+   Panelden iki kullanıcı oluşturun:
+   - `farmbot_backend` → `bot/#` üzerinde okuma + yazma
+   - `device_<cihaz-uuid>` → yalnızca `bot/device_<uuid>/#`
+2. Render → `farmbot-api` → **Environment** sekmesinde şunları girin:
+
+```
+MQTT_ENABLED = true
+MQTT_HOST    = <broker-adresi>.hivemq.cloud
+MQTT_PORT    = 8883
+MQTT_TLS     = true
+MQTT_USERNAME = farmbot_backend
+MQTT_PASSWORD = <parola>
+```
+
+3. Servis yeniden başlar. Panelde bağlantı göstergesi robot bağlanır bağlanmaz
+   yeşile döner.
+
+Cihaz UUID'sini Ayarlar bölümünden ya da `/api/v1/devices` yanıtından alırsınız.
+
+---
+
+## Robot (Raspberry Pi) tarafının yapması gerekenler
+
+1. Broker'a **kendi cihaz kimliğiyle** TLS üzerinden bağlanmak.
+2. Bağlanırken vasiyet (LWT) bırakmak:
+   - konu: `bot/device_<id>/status`
+   - içerik: `{"informational_settings":{"sync_status":"offline"}}`
+3. `bot/device_<id>/from_clients` konusunu dinleyip gelen CeleryScript
+   komutlarını uygulamak.
+4. Durum değiştikçe `bot/device_<id>/status` konusuna **retained** mesaj yayınlamak.
+5. Olayları `bot/device_<id>/logs`, komut yanıtlarını
+   `bot/device_<id>/from_device` konusuna göndermek.
+
+Komut listesi ve tam mesaj biçimleri: [MQTT Protokolü](MQTT.md)
+
+---
+
+## Alternatif: ön yüzü Vercel'de barındırmak
+
+Render'ın statik sitesi yerine Vercel kullanmak isterseniz:
+
+- **Root Directory:** `frontend`
+- **Build Command:** `npm run build`
+- **Output Directory:** `dist`
+- **Ortam değişkeni:** `VITE_API_URL = https://farmbot-api.onrender.com`
+
+Ardından Render'daki `farmbot-api` servisinin `CORS_ORIGINS` değerine Vercel
+adresini ekleyin.
+
+> `VITE_API_URL` şemasız verilirse istemci başına otomatik `https://` ekler ve
+> `/api/v1` son ekini tamamlar; WebSocket adresi de bundan türetilir
+> (`frontend/src/lib/api.ts`).
+
+---
+
+## Yerelde Docker ile
 
 ```bash
 cp .env.example .env
@@ -26,106 +127,36 @@ docker compose up --build
 
 ---
 
-## 2. Backend → Render
+## Veritabanı şeması
 
-1. Depoyu GitHub'a yükleyin.
-2. Render'da **New → Web Service** deyin, depoyu seçin.
-3. Ayarlar:
-   - **Root Directory:** `backend`
-   - **Runtime:** Docker
-   - **Health Check Path:** `/health`
-4. Aynı hesapta **New → PostgreSQL** ile bir veritabanı oluşturun.
-5. Ortam değişkenlerini girin:
-
-```
-ENVIRONMENT=production
-DEBUG=false
-DATABASE_URL=<Render'ın verdiği Internal Database URL>
-SECRET_KEY=<uzun rastgele dizi>
-CORS_ORIGINS=https://<ön-yüz-adresiniz>
-MQTT_HOST=<broker adresi>
-MQTT_PORT=8883
-MQTT_TLS=true
-MQTT_USERNAME=<kullanıcı>
-MQTT_PASSWORD=<parola>
-```
-
-> **Önemli:** Render'ın verdiği `DATABASE_URL` `postgres://` ile başlar.
-> SQLAlchemy async sürücüsü için başını `postgresql+asyncpg://` yapın.
-
-6. İlk dağıtımdan sonra şemayı kurun:
+Üretimde tablolar **otomatik oluşturulmaz**; şema Alembic göçleriyle yönetilir.
+Konteyner açılışında `RUN_MIGRATIONS_ON_START=true` olduğu için göçler
+kendiliğinden uygulanır.
 
 ```bash
+# yeni göç üret (model değiştirdikten sonra)
+alembic revision --autogenerate -m "aciklama"
+
+# elle uygula
 alembic upgrade head
+
+# geri al
+alembic downgrade -1
 ```
 
-> Üretimde `ENVIRONMENT=production` olduğu için tablolar otomatik oluşturulmaz;
-> şema yönetimi bilinçli olarak Alembic'e bırakılmıştır.
+> Birden fazla kopyaya ölçeklendirirseniz `RUN_MIGRATIONS_ON_START=false` yapıp
+> göçü ayrı bir adımda çalıştırın — aynı anda iki kopyanın göç uygulaması
+> çakışmaya yol açabilir.
 
 ---
 
-## 3. Frontend → Vercel
+## Yayın öncesi kontrol listesi
 
-1. Vercel'de projeyi içe aktarın.
-2. Ayarlar:
-   - **Root Directory:** `frontend`
-   - **Build Command:** `npm run build`
-   - **Output Directory:** `dist`
-3. Ortam değişkenleri (derleme zamanında gömülür):
-
-```
-VITE_API_URL=https://<backend-adresiniz>/api/v1
-VITE_WS_URL=wss://<backend-adresiniz>/api/v1/ws
-```
-
-4. Backend'in `CORS_ORIGINS` değerine Vercel adresini eklemeyi unutmayın.
-
----
-
-## 4. MQTT Broker
-
-### Seçenek A — Yönetilen (en kolay)
-HiveMQ Cloud ücretsiz katmanı 100 bağlantıya kadar yeter. Panelden iki kullanıcı açın:
-- `farmbot_backend` → `bot/#` üzerinde okuma+yazma
-- `device_<cihaz-uuid>` → yalnızca `bot/device_<uuid>/#`
-
-### Seçenek B — Kendi Mosquitto'nuz
-`infra/mosquitto/config/mosquitto.conf` dosyasındaki **ÜRETİM** bölümünü açın,
-sertifikaları yerleştirin ve kullanıcıları oluşturun:
-
-```bash
-docker compose exec mosquitto mosquitto_passwd -c /mosquitto/config/passwd farmbot_backend
-docker compose exec mosquitto mosquitto_passwd    /mosquitto/config/passwd device_<uuid>
-```
-
----
-
-## 5. Robot (Raspberry Pi) Tarafı
-
-Robotun yapması gerekenler:
-
-1. Broker'a **kendi cihaz kimliğiyle** TLS üzerinden bağlanmak.
-2. Bağlanırken vasiyet (LWT) bırakmak:
-   - konu: `bot/device_<id>/status`
-   - içerik: `{"informational_settings":{"sync_status":"offline"}}`
-3. `bot/device_<id>/from_clients` konusunu dinleyip gelen CeleryScript
-   komutlarını uygulamak.
-4. Durum değiştikçe `bot/device_<id>/status` konusuna **retained** mesaj yayınlamak.
-5. Olayları `bot/device_<id>/logs`, yanıtları `bot/device_<id>/from_device`
-   konusuna göndermek.
-
-Komut listesi ve tam mesaj biçimleri: [MQTT Protokolü](MQTT.md)
-
----
-
-## 6. Yayın Öncesi Kontrol Listesi
-
-- [ ] `SECRET_KEY` üretim için yeniden oluşturuldu
-      (`python -c "import secrets; print(secrets.token_urlsafe(48))"`)
-- [ ] `DEBUG=false` ve `ENVIRONMENT=production`
-- [ ] `SEED_DEMO_DATA=false` (demo hesap üretime sızmasın)
-- [ ] `CORS_ORIGINS` yalnızca gerçek ön yüz adresini içeriyor
-- [ ] MQTT TLS (8883) açık, anonim erişim kapalı
-- [ ] Veritabanı yedeklemesi etkin
-- [ ] `alembic upgrade head` çalıştırıldı
-- [ ] Sağlık kontrolü `/health` yanıt veriyor
+- [x] `SECRET_KEY` Render tarafından otomatik üretiliyor (`generateValue: true`)
+- [x] `DEBUG=false`, `ENVIRONMENT=production`
+- [x] Üretimde demo hesap oluşturulmuyor (yalnızca bitki kataloğu yükleniyor)
+- [x] `CORS_ORIGINS` yalnızca HMI adresini içeriyor (Blueprint otomatik bağlıyor)
+- [x] Şema göçleri açılışta uygulanıyor
+- [x] Sağlık kontrolü `/health`
+- [ ] MQTT TLS (8883) — robot bağlanınca açılacak
+- [ ] Veritabanı yedeklemesi (ücretli katmanda otomatik)
