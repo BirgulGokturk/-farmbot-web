@@ -48,12 +48,13 @@ services:
       - key: SECRET_KEY
         generateValue: true
 
-      # HMI'nin adresi otomatik bağlanır (şemayı backend tamamlar)
+      # HMI adresi AÇIKÇA yazılır.
+      # `fromService ... property: host` statik siteler için güvenilir biçimde
+      # doldurulmuyor; değişken boş kalınca varsayılan localhost devrede kalıyor
+      # ve tarayıcıdan gelen istekler CORS'a takılıyordu.
+      # Kendi alan adınızı eklerseniz virgülle ayırın.
       - key: CORS_ORIGINS
-        fromService:
-          name: farmbot-hmi
-          type: web
-          property: host
+        value: https://farmbot-hmi.onrender.com
 
       # Robot bağlanana kadar kapalı
       - key: MQTT_ENABLED
@@ -83,12 +84,10 @@ services:
     buildCommand: npm ci && npm run build
     staticPublishPath: ./dist
     envVars:
-      # API adresi otomatik bağlanır; şema ve /api/v1 son ekini istemci tamamlar
+      # API adresi açıkça yazılır (yukarıdaki CORS notuyla aynı sebep).
+      # İstemci `/api/v1` son ekini ve WebSocket adresini bundan türetir.
       - key: VITE_API_URL
-        fromService:
-          name: farmbot-api
-          type: web
-          property: host
+        value: https://farmbot-api.onrender.com
     routes:
       # Tek sayfa uygulaması: bilinmeyen yollar index.html'e düşsün
       - type: rewrite
