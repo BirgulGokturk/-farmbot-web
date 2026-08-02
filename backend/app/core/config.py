@@ -1,10 +1,10 @@
 """Uygulama ayarları — tamamı ortam değişkenlerinden (.env) okunur (12-Factor)."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -33,7 +33,11 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # --- CORS ---
-    CORS_ORIGINS: list[str] = Field(
+    # NoDecode şart: pydantic-settings, liste tipindeki alanları ortam
+    # değişkeninden okurken önce JSON olarak ayrıştırmayı dener ve
+    # "a.com,b.com" gibi bir değerde daha doğrulayıcıya sıra gelmeden
+    # SettingsError fırlatır. NoDecode ham metni aşağıdaki doğrulayıcıya iletir.
+    CORS_ORIGINS: Annotated[list[str], NoDecode] = Field(
         default=["http://localhost:5173", "http://127.0.0.1:5173"]
     )
 
@@ -74,9 +78,21 @@ class Settings(BaseSettings):
         sadece "app.onrender.com" biçiminde verir; CORS eşleşmesi için başına
         https:// koymak gerekir.
         """
-        items = (
-            [origin.strip() for origin in v.split(",")] if isinstance(v, str) else list(v or [])  # type: ignore[arg-type]
-        )
+        if isinstance(v, str):
+            text = v.strip()
+            # NoDecode JSON çözümlemesini kapattığı için JSON dizi biçimini
+            # burada elle destekliyoruz: ["https://a.com","https://b.com"]
+            if text.startswith("["):
+                import json
+
+                try:
+                    items = [str(item) for item in json.loads(text)]
+                except (json.JSONDecodeError, TypeError):
+                    items = [text]
+            else:
+                items = [origin.strip() for origin in text.split(",")]
+        else:
+            items = [str(item) for item in (v or [])]  # type: ignore[union-attr]
         normalized: list[str] = []
         for origin in items:
             if not origin:

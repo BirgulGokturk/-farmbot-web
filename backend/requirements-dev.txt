@@ -1,0 +1,6 @@
+# Geliştirme ve test bağımlılıkları.
+# Üretim imajına girmez; docker build yalnızca requirements.txt kullanır.
+-r requirements.txt
+
+pytest==8.4.2
+pytest-asyncio==1.2.0
