@@ -1,0 +1,39 @@
+# --- Ortam ---
+.env
+.env.local
+.env.*.local
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Veritabanı (yerel SQLite) ---
+*.db
+*.sqlite3
+
+# --- Node ---
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# --- Medya (robot fotoğrafları) ---
+backend/media/
+media/
+
+# --- Editör / işletim sistemi ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# --- Kayıtlar ---
+*.log
+npm-debug.log*

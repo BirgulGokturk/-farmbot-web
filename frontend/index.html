@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="tr" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#070c0e" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f4f7f4" media="(prefers-color-scheme: light)" />
+    <meta name="description" content="FarmBot akıllı tarım robotu için web yönetim paneli" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+
+    <!-- Premium tipografi: Sora (başlık) + Inter (gövde) + JetBrains Mono (sayısal) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <title>FarmBot · Yönetim Paneli</title>
+
+    <script>
+      // Sayfa boyanmadan temayı uygula — karanlıktan aydınlığa "flaş" olmasın
+      (function () {
+        try {
+          var saved = localStorage.getItem("farmbot-theme");
+          var prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+          var isDark = saved ? saved === "dark" : !prefersLight;
+          document.documentElement.classList.toggle("dark", isDark);
+        } catch (e) {
+          /* localStorage kapalıysa varsayılan karanlık modda kal */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

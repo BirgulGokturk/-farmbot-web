@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="55%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#g)" />
+  <!-- Portal çerçevesi: FarmBot'un gantry yapısı -->
+  <path d="M14 46V22a4 4 0 0 1 4-4h28a4 4 0 0 1 4 4v24"
+        fill="none" stroke="#04231a" stroke-width="4" stroke-linecap="round" />
+  <!-- Çapraz kızak ve Z ekseni -->
+  <path d="M14 30h36" stroke="#04231a" stroke-width="4" stroke-linecap="round" />
+  <rect x="27" y="26" width="10" height="8" rx="2" fill="#04231a" />
+  <path d="M32 34v8" stroke="#04231a" stroke-width="4" stroke-linecap="round" />
+  <!-- Toprak -->
+  <circle cx="32" cy="46" r="3" fill="#04231a" />
+</svg>

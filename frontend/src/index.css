@@ -1,0 +1,267 @@
+@import "tailwindcss";
+
+/* Karanlık mod, sistem tercihine değil `.dark` sınıfına bağlı — kullanıcı elle seçebilsin. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ========================================================================== *
+ *  TASARIM SİSTEMİ
+ *  Renkler iki katmanda tanımlı: önce ham değişkenler (:root / .dark),
+ *  sonra @theme inline ile Tailwind yardımcı sınıflarına bağlanır.
+ *  Böylece tek yerden tema değiştirilebilir.
+ * ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* Yüzeyler */
+  --bg: #f4f7f4;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #eef2ee;
+  --surface-3: #e4eae5;
+  --border: #dbe3dc;
+  --border-strong: #c3cfc5;
+
+  /* Metin */
+  --text: #0d1712;
+  --text-muted: #5c6f64;
+  --text-subtle: #8a9c91;
+
+  /* Marka ve durum renkleri */
+  --brand: #059669;
+  --brand-soft: #d1fae5;
+  --brand-contrast: #ffffff;
+  --accent: #0891b2;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #e11d48;
+  --info: #2563eb;
+
+  /* Gölge — yumuşak, katmanlı */
+  --shadow-sm: 0 1px 2px rgb(13 23 18 / 0.06);
+  --shadow-md: 0 4px 16px -4px rgb(13 23 18 / 0.10), 0 2px 6px -2px rgb(13 23 18 / 0.06);
+  --shadow-lg: 0 20px 48px -12px rgb(13 23 18 / 0.18);
+  --shadow-glow: 0 0 0 1px rgb(5 150 105 / 0.15), 0 8px 32px -8px rgb(5 150 105 / 0.35);
+
+  /* Degradeler */
+  --gradient-brand: linear-gradient(135deg, #34d399 0%, #10b981 45%, #059669 100%);
+  --gradient-accent: linear-gradient(135deg, #22d3ee 0%, #0ea5e9 100%);
+  --gradient-danger: linear-gradient(135deg, #fb7185 0%, #e11d48 100%);
+  --gradient-warm: linear-gradient(135deg, #fbbf24 0%, #f97316 100%);
+  --gradient-surface: linear-gradient(160deg, #ffffff 0%, #f4f7f4 100%);
+  --gradient-mesh:
+    radial-gradient(at 15% 12%, rgb(52 211 153 / 0.16) 0px, transparent 55%),
+    radial-gradient(at 85% 8%,  rgb(34 211 238 / 0.12) 0px, transparent 50%),
+    radial-gradient(at 70% 90%, rgb(132 204 22 / 0.10) 0px, transparent 55%);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --bg: #070c0e;
+  --bg-elevated: #0e1618;
+  --surface: #101a1c;
+  --surface-2: #162225;
+  --surface-3: #1d2c30;
+  --border: #223236;
+  --border-strong: #2f4348;
+
+  --text: #e6f0ec;
+  --text-muted: #93a9a2;
+  --text-subtle: #6b8079;
+
+  --brand: #34d399;
+  --brand-soft: #06301f;
+  --brand-contrast: #04231a;
+  --accent: #22d3ee;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #fb7185;
+  --info: #60a5fa;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 20px -4px rgb(0 0 0 / 0.5), 0 2px 8px -2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 24px 56px -12px rgb(0 0 0 / 0.7);
+  --shadow-glow: 0 0 0 1px rgb(52 211 153 / 0.22), 0 8px 40px -8px rgb(52 211 153 / 0.30);
+
+  --gradient-surface: linear-gradient(160deg, #162225 0%, #101a1c 100%);
+  --gradient-mesh:
+    radial-gradient(at 15% 12%, rgb(16 185 129 / 0.18) 0px, transparent 55%),
+    radial-gradient(at 85% 8%,  rgb(14 165 233 / 0.14) 0px, transparent 50%),
+    radial-gradient(at 70% 90%, rgb(132 204 22 / 0.10) 0px, transparent 55%);
+}
+
+@theme inline {
+  /* Tipografi — Sora başlıklarda, Inter gövdede: premium ve okunaklı */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Sora", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Renkleri Tailwind sınıflarına bağla: bg-surface, text-muted, border-line ... */
+  --color-bg: var(--bg);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+
+  --color-content: var(--text);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-contrast: var(--brand-contrast);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+
+  --shadow-soft: var(--shadow-md);
+  --shadow-float: var(--shadow-lg);
+  --shadow-brand: var(--shadow-glow);
+
+  --radius-card: 1rem;
+  --radius-panel: 1.25rem;
+
+  /* Yumuşak geçişler için ortak yavaşlama eğrisi */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ========================================================================== *
+ *  TEMEL
+ * ========================================================================== */
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--bg);
+    background-image: var(--gradient-mesh);
+    background-attachment: fixed;
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100dvh;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+
+  /* Klavye ile gezinenler için net odak halkası */
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 0.375rem;
+  }
+
+  /* Hareket hassasiyeti olan kullanıcılar için animasyonları kıs */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* İnce, temaya uyumlu kaydırma çubuğu */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background-color: var(--text-subtle); background-clip: content-box; }
+}
+
+/* ========================================================================== *
+ *  YARDIMCI SINIFLAR
+ * ========================================================================== */
+
+@layer utilities {
+  /* Degradeli metin — başlıklarda vurgu için */
+  .text-gradient {
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .bg-gradient-brand   { background-image: var(--gradient-brand); }
+  .bg-gradient-accent  { background-image: var(--gradient-accent); }
+  .bg-gradient-danger  { background-image: var(--gradient-danger); }
+  .bg-gradient-warm    { background-image: var(--gradient-warm); }
+  .bg-gradient-surface { background-image: var(--gradient-surface); }
+
+  /* Buzlu cam etkisi — üst çubuk ve yüzen paneller */
+  .glass {
+    background-color: color-mix(in oklab, var(--surface) 72%, transparent);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+  }
+
+  /* Kart kenarına içeriden ince ışık — premium derinlik hissi */
+  .ring-inset-light {
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.06);
+  }
+
+  .transition-soft {
+    transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+    transition-duration: 220ms;
+    transition-timing-function: var(--ease-out-soft);
+  }
+
+  /* Tarla tasarımcısının arka plan ızgarası */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, var(--border) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* Canlı bağlantı göstergesi */
+  .pulse-dot::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background: currentColor;
+    animation: pulse-ring 2s var(--ease-out-soft) infinite;
+  }
+
+  .animate-fade-up { animation: fade-up 0.45s var(--ease-out-soft) both; }
+  .animate-fade-in { animation: fade-in 0.3s var(--ease-out-soft) both; }
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(1);   opacity: 0.6; }
+  70%  { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
