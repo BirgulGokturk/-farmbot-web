@@ -471,6 +471,15 @@ export const api = {
         method: "POST",
         body: input,
       }),
+    /** Isı haritası için ızgara taraması: robot gezip her durakta ölçüm alır. */
+    survey: (
+      deviceId: string,
+      input: { sensor_id: string; columns?: number; rows?: number; speed?: number },
+    ) =>
+      request<CommandResponse>(`/devices/${deviceId}/control/survey`, {
+        method: "POST",
+        body: input,
+      }),
     takePhoto: (deviceId: string) =>
       request<CommandResponse>(`/devices/${deviceId}/control/take-photo`, { method: "POST" }),
     emergencyLock: (deviceId: string) =>

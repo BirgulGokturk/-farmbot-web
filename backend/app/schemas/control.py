@@ -55,6 +55,16 @@ class WaterPointRequest(BaseModel):
     speed: int = Field(default=100, ge=1, le=100)
 
 
+class SurveyRequest(BaseModel):
+    """Isı haritası için ızgara taraması."""
+
+    sensor_id: uuid.UUID
+    # 4×3 = 12 durak makul bir başlangıç; simülatörde ~1 dakika sürer
+    columns: int = Field(default=4, ge=2, le=12)
+    rows: int = Field(default=3, ge=2, le=12)
+    speed: int = Field(default=100, ge=1, le=100)
+
+
 class ExecuteSequenceRequest(BaseModel):
     sequence_id: uuid.UUID
 

@@ -197,8 +197,10 @@ class VirtualRobot:
             await self._publish_status()
 
         elif kind == "read_pin":
+            # Gerçek robotta da okuma bir sensör kaydı üretir; ısı haritası
+            # bu kayıtların konumundan besleniyor.
             pin = int(args.get("pin_number", 0))
-            value = self._sensor_value(pin)
+            value = await self._record_reading(pin)
             await self._log(f"Pin {pin} okundu: {value:.1f}", "info")
             await hub.broadcast(
                 self.device_id,
@@ -325,6 +327,60 @@ class VirtualRobot:
 
         with contextlib.suppress(Exception):
             await evaluate_device_alerts(device_uuid)
+
+    async def _record_reading(self, pin: int) -> float:
+        """Belirtilen pindeki sensörü okur ve mevcut konumla birlikte kaydeder."""
+        from sqlalchemy import select
+
+        from app.db.session import SessionLocal
+        from app.models import Sensor, SensorReading
+
+        try:
+            device_uuid = uuid.UUID(self.device_id)
+        except ValueError:
+            return self._sensor_value(pin)
+
+        async with SessionLocal() as session:
+            sensor = (
+                await session.execute(
+                    select(Sensor).where(Sensor.device_id == device_uuid, Sensor.pin == pin)
+                )
+            ).scalar_one_or_none()
+
+            value = self._sensor_value(
+                pin,
+                sensor.min_value if sensor else 0.0,
+                sensor.max_value if sensor else 100.0,
+            )
+            now = datetime.now(timezone.utc)
+
+            session.add(
+                SensorReading(
+                    device_id=device_uuid,
+                    sensor_id=sensor.id if sensor else None,
+                    pin=pin,
+                    value=round(value, 1),
+                    x=self.x,
+                    y=self.y,
+                    z=self.z,
+                    read_at=now,
+                )
+            )
+            await session.commit()
+
+            if sensor is not None:
+                await hub.broadcast(
+                    self.device_id,
+                    {
+                        "type": "reading",
+                        "payload": {
+                            "sensor_id": str(sensor.id),
+                            "value": round(value, 1),
+                            "read_at": now.isoformat(),
+                        },
+                    },
+                )
+            return value
 
     def _sensor_value(self, pin: int, low: float = 0.0, high: float = 100.0) -> float:
         """Günün saatine göre yavaşça salınan, pinine göre farklılaşan değer."""

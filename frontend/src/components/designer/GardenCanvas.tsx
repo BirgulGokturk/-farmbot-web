@@ -67,6 +67,12 @@ interface GardenCanvasProps {
   curves: Map<string, Curve>;
   /** Isı haritası ölçümleri; null ise katman kapalı. */
   heatmap?: SpatialReading[] | null;
+  /**
+   * Renk ölçeğinin alt/üst sınırı — seçili sensörün kendi aralığı.
+   * Farklı birimdeki sensörler (nem %, sıcaklık °C, ışık lux) tek ölçeğe
+   * sokulursa renkler anlamsız çıkar; bu yüzden ölçek sensöre göre verilir.
+   */
+  heatRange?: { min: number; max: number };
 }
 
 export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
@@ -83,6 +89,7 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
       viewDate,
       curves,
       heatmap,
+      heatRange,
     },
     ref,
   ) {
@@ -444,16 +451,17 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
               strokeWidth={3 / view.scale}
             />
 
-            {/* Isı haritası — yataktan taşmasın diye kırpma uygulanır */}
+            {/* Isı haritası */}
             {heatmap && heatmap.length > 0 && (
-              <g opacity="0.55" filter="url(#heat-blur)">
+              <g opacity="0.6" filter="url(#heat-blur)">
                 {bucketReadings(heatmap).map((cell, index) => (
                   <circle
                     key={index}
                     cx={cell.x}
                     cy={cell.y}
-                    r={340}
-                    fill={heatColor(cell.value)}
+                    // Ölçüm noktaları seyrek olduğu için lekeler geniş tutulur
+                    r={700}
+                    fill={heatColor(cell.value, heatRange)}
                   />
                 ))}
               </g>
@@ -698,9 +706,16 @@ function bucketReadings(readings: SpatialReading[], cellSize = 400) {
   }));
 }
 
-/** Kuru (düşük) → sıcak kırmızı, nemli (yüksek) → serin mavi. */
-function heatColor(value: number): string {
-  const t = Math.max(0, Math.min(1, value / 100));
+/**
+ * Düşük değer → sıcak kırmızı, yüksek değer → serin mavi.
+ * Ölçek seçili sensörün kendi aralığına göre normalize edilir; aksi halde
+ * lux ile °C aynı renk skalasına düşer ve harita anlamsızlaşır.
+ */
+function heatColor(value: number, range?: { min: number; max: number }): string {
+  const min = range?.min ?? 0;
+  const max = range?.max ?? 100;
+  const span = max - min || 1;
+  const t = Math.max(0, Math.min(1, (value - min) / span));
   const hue = 8 + t * 200; // 8° kırmızı → 208° mavi
   return `hsl(${hue} 85% 55%)`;
 }

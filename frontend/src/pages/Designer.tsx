@@ -10,6 +10,7 @@ import {
   // Yerleşik `Map` sınıfını gölgelemesin diye takma adla alınıyor
   Map as MapIcon,
   Navigation,
+  Radar,
   Redo2,
   RotateCcw,
   Search,
@@ -110,15 +111,30 @@ export default function Designer() {
     enabled: Boolean(deviceId),
   });
 
+  // İlk sensörü otomatik seç: "tüm sensörler" birimleri karıştırdığı için
+  // (nem %, sıcaklık °C, ışık lux) tek ölçekte anlamsız renk üretiyordu.
+  useEffect(() => {
+    if (!heatSensorId && sensors?.length) setHeatSensorId(sensors[0].id);
+  }, [sensors, heatSensorId]);
+
+  const heatSensor = sensors?.find((sensor) => sensor.id === heatSensorId);
+
   const { data: heatReadings } = useQuery({
     queryKey: ["spatial", deviceId, heatSensorId],
-    queryFn: () =>
-      api.hardware.spatialReadings(deviceId!, {
-        sensor_id: heatSensorId || undefined,
-        hours: 168,
-      }),
-    enabled: Boolean(deviceId) && heatmapOn,
+    queryFn: () => api.hardware.spatialReadings(deviceId!, { sensor_id: heatSensorId, hours: 168 }),
+    enabled: Boolean(deviceId) && heatmapOn && Boolean(heatSensorId),
+    // Ölçüm turu sürerken harita kendiliğinden dolsun
+    refetchInterval: heatmapOn ? 5000 : false,
   });
+
+  /** Kaç farklı noktadan ölçüm var — haritanın anlamlı olup olmadığını belirler. */
+  const distinctSpots = useMemo(
+    () =>
+      new Set(
+        (heatReadings ?? []).map((r) => `${Math.round(r.x / 400)}:${Math.round(r.y / 400)}`),
+      ).size,
+    [heatReadings],
+  );
 
   const curves = useMemo(
     () => new Map((curveList ?? []).map((curve) => [curve.id, curve])),
@@ -416,35 +432,46 @@ export default function Designer() {
             ))}
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 text-sm text-muted">
-              <Flame className="size-4" />
-              Isı haritası
-            </span>
-            <Toggle
-              checked={heatmapOn}
-              onChange={setHeatmapOn}
-              label="Isı haritası"
-              tone="warning"
-              disabled={viewMode === "3d"}
-            />
-            {heatmapOn && viewMode === "2d" && (
-              <Select
-                name="heatSensor"
-                value={heatSensorId}
-                onChange={(event) => setHeatSensorId(event.target.value)}
-                className="h-8 w-40 text-xs"
-              >
-                <option value="">Tüm sensörler</option>
-                {(sensors ?? []).map((sensor) => (
-                  <option key={sensor.id} value={sensor.id}>
-                    {sensor.label}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </div>
+          {/* Isı haritası yalnızca kuşbakışı görünümde anlamlı */}
+          {viewMode === "2d" && (
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5 text-sm text-muted">
+                <Flame className="size-4" />
+                Isı haritası
+              </span>
+              <Toggle
+                checked={heatmapOn}
+                onChange={setHeatmapOn}
+                label="Isı haritası"
+                tone="warning"
+                disabled={!sensors?.length}
+              />
+              {heatmapOn && (
+                <Select
+                  name="heatSensor"
+                  value={heatSensorId}
+                  onChange={(event) => setHeatSensorId(event.target.value)}
+                  className="h-8 w-40 text-xs"
+                >
+                  {(sensors ?? []).map((sensor) => (
+                    <option key={sensor.id} value={sensor.id}>
+                      {sensor.label} ({sensor.unit || "birimsiz"})
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Isı haritası durumu ve veri toplama */}
+        {viewMode === "2d" && heatmapOn && (
+          <HeatmapStatus
+            sensor={heatSensor}
+            readings={heatReadings ?? []}
+            distinctSpots={distinctSpots}
+          />
+        )}
 
         {dayOffset !== 0 && (
           <p className="mt-2.5 rounded-lg bg-brand/10 px-3 py-2 text-xs text-brand">
@@ -535,6 +562,11 @@ export default function Designer() {
               viewDate={viewDate}
               curves={curves}
               heatmap={heatmapOn ? (heatReadings ?? []) : null}
+              heatRange={
+                heatSensor
+                  ? { min: heatSensor.min_value, max: heatSensor.max_value }
+                  : undefined
+              }
               onSendBot={async (x, y) => {
                 if (!deviceId) return;
                 try {
@@ -603,6 +635,84 @@ export default function Designer() {
 }
 
 // --------------------------------------------------------------------------- //
+
+/**
+ * Isı haritasının neden boş göründüğünü açıklar ve veriyi toplamanın yolunu sunar.
+ * Önceden katman sessizce boş kalıyordu: robot hiç gezmediği için tüm ölçümler
+ * tek noktadaydı ve haritada görünmüyordu.
+ */
+function HeatmapStatus({
+  sensor,
+  readings,
+  distinctSpots,
+}: {
+  sensor: import("@/lib/types").Sensor | undefined;
+  readings: import("@/lib/types").SpatialReading[];
+  distinctSpots: number;
+}) {
+  const deviceId = useDeviceId();
+  const [running, setRunning] = useState(false);
+
+  async function startSurvey() {
+    if (!deviceId || !sensor) return;
+    setRunning(true);
+    try {
+      const response = await api.control.survey(deviceId, {
+        sensor_id: sensor.id,
+        columns: 4,
+        rows: 3,
+      });
+      toast.success(
+        "Ölçüm turu başladı",
+        response.detail ?? "Robot bahçeyi gezerken harita dolacak.",
+      );
+    } catch (error) {
+      toast.error("Tur başlatılamadı", (error as Error).message);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  if (!sensor) {
+    return (
+      <p className="mt-2.5 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
+        Isı haritası için önce Ayarlar bölümünden bir sensör tanımlamalısınız.
+      </p>
+    );
+  }
+
+  // İki farklı noktadan azsa harita bir leke olmaktan öteye geçmez
+  const tooSparse = distinctSpots < 2;
+
+  return (
+    <div
+      className={cn(
+        "mt-2.5 flex flex-wrap items-center gap-3 rounded-lg px-3 py-2 text-xs",
+        tooSparse ? "bg-warning/10 text-warning" : "bg-surface-2 text-muted",
+      )}
+    >
+      <span className="flex-1">
+        {tooSparse ? (
+          <>
+            <strong>Harita için yeterli veri yok.</strong> {sensor.label} yalnızca{" "}
+            {distinctSpots} noktadan ölçülmüş. Robotun bahçeyi gezip farklı noktalardan
+            ölçüm alması gerekiyor.
+          </>
+        ) : (
+          <>
+            {sensor.label} · {readings.length} ölçüm, {distinctSpots} farklı nokta ·{" "}
+            <span className="text-danger">kırmızı düşük</span> →{" "}
+            <span className="text-info">mavi yüksek</span> ({sensor.min_value}–
+            {sensor.max_value} {sensor.unit})
+          </>
+        )}
+      </span>
+      <Button size="sm" icon={<Radar className="size-3.5" />} loading={running} onClick={startSurvey}>
+        Ölçüm Turu Yap
+      </Button>
+    </div>
+  );
+}
 
 function Shortcut({ keys, text }: { keys: string; text: string }) {
   return (

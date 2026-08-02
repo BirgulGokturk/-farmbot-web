@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DbSession, OwnedDevice, ensure_unlocked
-from app.models import Device, Point, Tool
+from app.models import Device, Point, Sensor, Tool
 from app.schemas.control import (
     CommandResponse,
     ExecuteSequenceRequest,
@@ -23,6 +23,7 @@ from app.schemas.control import (
     PinReadRequest,
     PinWriteRequest,
     RawCommandRequest,
+    SurveyRequest,
     WaterPointRequest,
 )
 from app.services import commands, gateway
@@ -227,6 +228,45 @@ async def execute_sequence(
     return await _dispatch(
         device, [commands.execute_sequence(payload.sequence_id)], wait=False
     )
+
+
+@router.post("/survey", response_model=CommandResponse)
+async def survey(
+    payload: SurveyRequest, device: OwnedDevice, db: DbSession
+) -> CommandResponse:
+    """Ölçüm turu: robotu ızgara üzerinde gezdirip her durakta sensörü okur.
+
+    Isı haritasının anlamlı olabilmesi için bahçenin farklı noktalarından
+    ölçüm gerekir; bu uç nokta o veriyi tek komutla toplar.
+    """
+    ensure_unlocked(device)
+
+    result = await db.execute(
+        select(Sensor).where(Sensor.id == payload.sensor_id, Sensor.device_id == device.id)
+    )
+    sensor = result.scalar_one_or_none()
+    if sensor is None:
+        raise HTTPException(404, detail="Sensör bulunamadı")
+
+    # Kenarlardan biraz içeriden başla: robot sınıra dayanmasın
+    margin = 200
+    usable_x = max(0, device.bed_width_mm - margin * 2)
+    usable_y = max(0, device.bed_length_mm - margin * 2)
+
+    body: list[dict] = []
+    for row in range(payload.rows):
+        y = margin + (usable_y * row / max(1, payload.rows - 1))
+        # Yılan (boustrophedon) deseni: her sırada yön değişir, yol kısalır
+        columns = range(payload.columns) if row % 2 == 0 else reversed(range(payload.columns))
+        for column in columns:
+            x = margin + (usable_x * column / max(1, payload.columns - 1))
+            body.append(commands.move_absolute(round(x), round(y), device.safe_height_mm, payload.speed))
+            body.append(commands.read_pin(sensor.pin, sensor.mode, sensor.label))
+
+    stops = payload.rows * payload.columns
+    response = await _dispatch(device, body, wait=False)
+    response.detail = f"{stops} noktada ölçüm turu başlatıldı"
+    return response
 
 
 @router.post("/raw", response_model=CommandResponse)
