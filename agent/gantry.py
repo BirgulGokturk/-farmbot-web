@@ -29,6 +29,13 @@ logger = logging.getLogger("farmbot-agent.gantry")
 # Eksen sırası Gantry Studio ile aynı: 0=X, 1=Y, 2=Z
 AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
+# Gantry Studio hareket komutlarında HTTP yanıtını **hareket bitene kadar**
+# tutuyor: `movexyz` içeride `safe_goto` çalıştırıyor (Z kaldır → yatayda git →
+# indir) ve her eksen için 45 saniyeye kadar bekliyor. Bu yüzden komut zaman
+# aşımı cömert olmalı; kısa tutulursa her gerçek hareket ReadTimeout ile
+# başarısız olur.
+COMMAND_TIMEOUT_SECONDS = 180.0
+
 
 class GantryUnavailable(Exception):
     """Gantry Studio çalışmıyor ya da yanıt vermiyor."""
@@ -40,9 +47,12 @@ class GantryClient:
         base_url: str = "http://localhost:8091",
         username: str = "",
         password: str = "",
-        timeout: float = 10.0,
+        status_timeout: float = 5.0,
+        command_timeout: float = COMMAND_TIMEOUT_SECONDS,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self._status_timeout = status_timeout
+        self._command_timeout = command_timeout
 
         headers: dict[str, str] = {}
         # gantry_config.json'da kullanıcı/parola tanımlıysa temel kimlik doğrulama
@@ -50,9 +60,8 @@ class GantryClient:
             token = base64.b64encode(f"{username}:{password}".encode()).decode()
             headers["Authorization"] = f"Basic {token}"
 
-        self._http = httpx.AsyncClient(
-            base_url=self.base_url, headers=headers, timeout=httpx.Timeout(timeout)
-        )
+        # Zaman aşımı isteğe göre ayrı veriliyor (aşağıdaki nota bakın)
+        self._http = httpx.AsyncClient(base_url=self.base_url, headers=headers)
         # Bağlantı kopunca her denemede hata basmamak için durum takibi
         self._was_reachable: bool | None = None
 
@@ -70,7 +79,7 @@ class GantryClient:
         Gantry Studio kapalıyken sensör akışı etkilenmemeli.
         """
         try:
-            response = await self._http.get("/api/status")
+            response = await self._http.get("/api/status", timeout=self._status_timeout)
             response.raise_for_status()
             data = response.json()
         except Exception as exc:
@@ -102,12 +111,23 @@ class GantryClient:
         düğmeye bastıysa sonucu görmeli.
         """
         try:
-            response = await self._http.post("/api/cmd", json=payload)
+            response = await self._http.post(
+                "/api/cmd", json=payload, timeout=self._command_timeout
+            )
             response.raise_for_status()
             result = response.json()
-        except Exception as exc:
+        except httpx.TimeoutException as exc:
+            # Zaman aşımı ile "servis kapalı" farklı sorunlar; ayrı mesaj verelim
             raise GantryUnavailable(
-                f"Hareket kontrolüne ulaşılamıyor: {exc}. "
+                f"Hareket {self._command_timeout:.0f} saniyede tamamlanmadı. "
+                "Eksen sıkışmış ya da hedef çok uzak olabilir."
+            ) from exc
+        except Exception as exc:
+            # httpx bazı hatalarda boş mesaj döndürüyor; tipi de yazalım ki
+            # günlükten sebep anlaşılsın
+            detail = str(exc) or type(exc).__name__
+            raise GantryUnavailable(
+                f"Hareket kontrolüne ulaşılamıyor ({detail}). "
                 "Raspberry Pi'de gantry-studio servisi çalışıyor mu?"
             ) from exc
 

@@ -178,6 +178,8 @@ class Agent:
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         # Buluta açık WebSocket; konum yayını da bunu kullanır
         self._socket: Any | None = None
+        # Çalışan komut görevleri; referans tutulmazsa çöp toplayıcı iptal eder
+        self._running: set[asyncio.Task[None]] = set()
 
     # ------------------------------------------------------------------ #
     # Arduino → tampon
@@ -370,6 +372,18 @@ class Agent:
         if message.get("type") != "rpc":
             return
 
+        # Komutu AYRI bir görevde çalıştırıyoruz.
+        #
+        # Neden: hareket komutları uzun sürüyor (Gantry Studio hareket bitene
+        # kadar HTTP yanıtını tutuyor, dakikalar alabilir). Komutu burada
+        # beklersek WebSocket okuma döngüsü durur ve o sırada gelen ACİL
+        # DURDURMA komutu sıraya takılır. Hareketli bir makinede kabul edilemez.
+        task = asyncio.create_task(self._run_command(socket, message))
+        # Görev bitene kadar referansı tut; yoksa çöp toplayıcı iptal edebilir
+        self._running.add(task)
+        task.add_done_callback(self._running.discard)
+
+    async def _run_command(self, socket: Any, message: dict[str, Any]) -> None:
         label = message.get("label")
         body = message.get("body") or []
 
@@ -379,13 +393,17 @@ class Agent:
                 await self._apply_step(step)
         except Exception as exc:
             ok, error = False, str(exc)
-            logger.exception("Komut uygulanamadı")
+            logger.error("Komut uygulanamadı: %s", exc)
 
-        await socket.send(
-            json.dumps(
-                {"type": "rpc_result", "label": label, "payload": {"ok": ok, "error": error}}
+        try:
+            await socket.send(
+                json.dumps(
+                    {"type": "rpc_result", "label": label, "payload": {"ok": ok, "error": error}}
+                )
             )
-        )
+        except Exception:
+            # Bağlantı bu arada koptuysa yanıtı yollayamayız; komut yine uygulandı
+            logger.debug("Komut sonucu gönderilemedi (bağlantı kopmuş olabilir)")
 
     async def _apply_step(self, step: dict[str, Any]) -> None:
         """CeleryScript adımını donanım komutuna çevirir.

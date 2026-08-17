@@ -65,6 +65,12 @@ async def _dispatch(
 # Hareket
 # --------------------------------------------------------------------------- #
 
+# Hareket komutlarında yanıt BEKLENMEZ.
+#
+# Gerçek donanımda bir hareket dakikalar sürebilir; istek boyunca beklemek
+# arayüzü kilitler ve HTTP zaman aşımına yol açar. Bunun yerine komut sıraya
+# konur ve ilerleme WebSocket'ten gelen canlı konumla izlenir — kullanıcı
+# robotun hareket ettiğini zaten panelde görür.
 @router.post("/move-relative", response_model=CommandResponse)
 async def move_relative(payload: MoveRelativeRequest, device: OwnedDevice) -> CommandResponse:
     """Jog pad butonları bunu çağırır."""
@@ -72,6 +78,7 @@ async def move_relative(payload: MoveRelativeRequest, device: OwnedDevice) -> Co
     return await _dispatch(
         device,
         [commands.move_relative(payload.x, payload.y, payload.z, payload.speed)],
+        wait=False,
     )
 
 
@@ -82,6 +89,7 @@ async def move_absolute(payload: MoveAbsoluteRequest, device: OwnedDevice) -> Co
     return await _dispatch(
         device,
         [commands.move_absolute(payload.x, payload.y, payload.z, payload.speed)],
+        wait=False,
     )
 
 
