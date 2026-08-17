@@ -14,6 +14,7 @@ import {
 import { toast } from "@/components/ui/toast";
 import { AgentSetup } from "@/components/settings/AgentSetup";
 import { AlertRules } from "@/components/settings/AlertRules";
+import { InstallApp } from "@/components/settings/InstallApp";
 import { api } from "@/lib/api";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
 import { useAuth } from "@/store/useAuth";
@@ -40,6 +41,8 @@ export default function SettingsPage() {
         {device && <WorkspaceSettings device={device} />}
         <AgentSetup />
         <HardwareSettings />
+        <AgentSetup />
+        <InstallApp />
         <AlertRules />
 
         <div className="space-y-5">

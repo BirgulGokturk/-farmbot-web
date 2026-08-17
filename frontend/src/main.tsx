@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { Toaster } from "@/components/ui/toast";
 import { ApiError } from "@/lib/api";
+import { registerServiceWorker } from "@/lib/pwa";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -26,6 +27,9 @@ const queryClient = new QueryClient({
 
 const container = document.getElementById("root");
 if (!container) throw new Error("#root bulunamadı");
+
+// Çevrimdışı kabuk ve "uygulama olarak kurma" desteği
+registerServiceWorker();
 
 createRoot(container).render(
   <StrictMode>
