@@ -32,16 +32,19 @@ class Transport(str, Enum):
     NONE = "none"
 
 
-def transport_for(device_id: str | None = None) -> Transport:
+def transport_for(device_id: str | None = None, *, paired: bool = False) -> Transport:
     """Belirli bir cihaz için etkin taşıyıcı.
 
-    Ajan bağlantısı cihaza özeldir; MQTT ve simülatör genel ayarlara bakar.
+    `paired`: cihaza gerçek donanım eşleştirilmiş mi (ajan token'ı üretilmiş mi).
+    Eşleştirilmiş bir cihazda ajan o an bağlı değilse simülatöre **düşmeyiz** —
+    aksi hâlde sanal veri gerçek ölçümlerin arasına karışır ve grafik, donanım
+    kopmuşken bile hareket etmeye devam eder.
     """
     if device_id and agent_hub.is_connected(device_id):
         return Transport.AGENT
     if settings.MQTT_ENABLED and bridge.connected:
         return Transport.MQTT
-    if settings.SIMULATOR_ENABLED:
+    if settings.SIMULATOR_ENABLED and not paired:
         return Transport.SIMULATOR
     return Transport.NONE
 
@@ -65,7 +68,8 @@ async def send(
     Bağlantı yoksa `ConnectionError` yükseltir; API katmanı bunu 503'e çevirir.
     """
     device_id = str(device.id)
-    transport = transport_for(device_id)
+    paired = _is_paired(device)
+    transport = transport_for(device_id, paired=paired)
 
     if transport is Transport.AGENT:
         return await agent_hub.send_command(device_id, body, wait=wait)
@@ -79,6 +83,11 @@ async def send(
         # Sanal robot komutu sıraya alır; arayüz ilerlemeyi WebSocket'ten izler
         return {"kind": "rpc_ok", "args": {"label": "simulator"}}
 
+    if paired:
+        raise ConnectionError(
+            "Köprü ajanı bağlı değil. Raspberry Pi'nin açık ve internete bağlı "
+            "olduğunu kontrol edin (systemctl status farmbot-agent)."
+        )
     raise ConnectionError(
         "Robota ulaşılamıyor. Köprü ajanı bağlı değil, MQTT kapalı ve simülatör devre dışı."
     )
@@ -87,8 +96,13 @@ async def send(
 async def ensure_started(device: Any) -> None:
     """Simülatör modundaysa cihazın sanal robotunu ayağa kaldırır.
 
-    Gerçek donanım (ajan veya MQTT) bağlıyken simülatör başlatılmaz — iki
-    kaynağın aynı cihaza veri yazması karışıklık yaratır.
+    Gerçek donanım eşleştirilmiş bir cihazda simülatör hiç başlatılmaz; ajan
+    geçici olarak kopsa bile sanal veri üretilmez.
     """
-    if transport_for(str(device.id)) is Transport.SIMULATOR:
+    if transport_for(str(device.id), paired=_is_paired(device)) is Transport.SIMULATOR:
         await simulator.robot_for(device)
+
+
+def _is_paired(device: Any) -> bool:
+    """Cihaza gerçek donanım eşleştirilmiş mi? (ajan token'ı üretilmişse evet)"""
+    return getattr(device, "agent_token_hash", None) is not None

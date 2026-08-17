@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.api.deps import DbSession, OwnedDevice
 from app.models import Peripheral, Sensor, SensorReading
@@ -211,6 +211,35 @@ async def spatial_readings(
         SpatialReading(x=row.x, y=row.y, value=row.value, read_at=row.read_at)
         for row in result.all()
     ]
+
+
+@router.delete("/readings", response_model=Message)
+async def clear_readings(
+    device: OwnedDevice,
+    db: DbSession,
+    before: datetime | None = Query(
+        default=None,
+        description="Yalnızca bu andan önceki ölçümleri sil (boşsa hepsi silinir)",
+    ),
+    sensor_id: uuid.UUID | None = Query(default=None, description="Tek bir sensörle sınırla"),
+) -> Message:
+    """Ölçüm geçmişini temizler.
+
+    Asıl kullanım: gerçek donanım bağlanmadan önce simülatörün ürettiği sanal
+    veriyi silmek. Sanal ve gerçek ölçümler aynı grafikte karışınca okunamaz
+    hâle geliyor.
+    """
+    conditions = [SensorReading.device_id == device.id]
+    if before is not None:
+        conditions.append(SensorReading.read_at < before)
+    if sensor_id is not None:
+        conditions.append(SensorReading.sensor_id == sensor_id)
+
+    result = await db.execute(delete(SensorReading).where(*conditions))
+    await db.commit()
+
+    deleted = result.rowcount or 0
+    return Message(detail=f"{deleted} ölçüm silindi")
 
 
 @router.get("/readings/latest", response_model=list[SensorReadingRead])

@@ -383,6 +383,13 @@ export const api = {
     latestReadings: (deviceId: string) =>
       request<import("./types").SensorReading[]>(`/devices/${deviceId}/readings/latest`),
 
+    /** Ölçüm geçmişini siler — simülatör verisini temizlemek için. */
+    clearReadings: (deviceId: string, params?: { sensor_id?: string; before?: string }) =>
+      request<{ detail: string }>(`/devices/${deviceId}/readings`, {
+        method: "DELETE",
+        query: params,
+      }),
+
     /** Isı haritası için konumlu ölçümler. */
     spatialReadings: (
       deviceId: string,

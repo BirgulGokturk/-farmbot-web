@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Area,
   AreaChart,
@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Activity, ListTree, RefreshCw } from "lucide-react";
+import { Activity, ListTree, RefreshCw, Trash2 } from "lucide-react";
 
 import {
   Badge,
@@ -37,12 +37,28 @@ const RANGES = [
 
 export default function Sensors() {
   const deviceId = useDeviceId();
+  const queryClient = useQueryClient();
   const [hours, setHours] = useState(24);
 
   const { data: sensors, isLoading } = useQuery({
     queryKey: ["sensors", deviceId],
     queryFn: () => api.hardware.sensors(deviceId!),
     enabled: Boolean(deviceId),
+  });
+
+  /**
+   * Gerçek donanım bağlanmadan önce simülatör sanal veri üretmiş olur.
+   * Sanal ve gerçek ölçümler aynı grafikte karışınca okunamaz hâle gelir;
+   * bu düğme geçmişi temizleyip sıfırdan başlamayı sağlar.
+   */
+  const clearHistory = useMutation({
+    mutationFn: () => api.hardware.clearReadings(deviceId!),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: ["sensor-series"] });
+      void queryClient.invalidateQueries({ queryKey: ["spatial", deviceId] });
+      toast.success("Geçmiş temizlendi", result.detail);
+    },
+    onError: (error) => toast.error("Temizlenemedi", (error as Error).message),
   });
 
   return (
@@ -52,18 +68,29 @@ export default function Sensors() {
         description="Anlık değerler ve geçmiş ölçümler"
         icon={<ListTree className="size-5" />}
         actions={
-          <Select
-            name="range"
-            value={hours}
-            onChange={(e) => setHours(Number(e.target.value))}
-            className="w-36"
-          >
-            {RANGES.map((range) => (
-              <option key={range.hours} value={range.hours}>
-                {range.label}
-              </option>
-            ))}
-          </Select>
+          <>
+            <Button
+              size="sm"
+              variant="danger"
+              icon={<Trash2 className="size-4" />}
+              loading={clearHistory.isPending}
+              onClick={() => clearHistory.mutate()}
+            >
+              Geçmişi Temizle
+            </Button>
+            <Select
+              name="range"
+              value={hours}
+              onChange={(e) => setHours(Number(e.target.value))}
+              className="w-36"
+            >
+              {RANGES.map((range) => (
+                <option key={range.hours} value={range.hours}>
+                  {range.label}
+                </option>
+              ))}
+            </Select>
+          </>
         }
       />
 
@@ -102,13 +129,46 @@ function SensorCard({ sensor, hours }: { sensor: Sensor; hours: number }) {
     enabled: Boolean(deviceId),
   });
 
-  const chartData =
-    series?.points.map((point) => ({
-      time: formatTime(point.t),
-      value: point.v,
-    })) ?? [];
+  /**
+   * WebSocket'ten gelen ölçümler grafiğe anında eklenir.
+   * Önceden grafik yalnızca sayfa açılışında veri çekiyordu; yeni ölçüm
+   * gelse bile kullanıcı sayfayı yenilemeden değişimi göremiyordu.
+   * Sunucudan tekrar veri istemek yerine noktayı yerelde eklemek hem anında
+   * hem de ağ trafiği yaratmadan çalışır.
+   */
+  const [livePoints, setLivePoints] = useState<{ t: string; v: number }[]>([]);
 
-  const latest = live?.value ?? series?.points.at(-1)?.v;
+  useEffect(() => {
+    if (!live) return;
+    setLivePoints((current) => {
+      // Aynı ölçüm iki kez eklenmesin
+      if (current.at(-1)?.t === live.read_at) return current;
+      // Grafiği sınırla: sonsuz büyümesin
+      return [...current, { t: live.read_at, v: live.value }].slice(-200);
+    });
+  }, [live]);
+
+  // Sunucudan yeni seri gelince yerel tampon sıfırlanır (artık onun içinde)
+  useEffect(() => {
+    setLivePoints([]);
+  }, [series]);
+
+  const points = useMemo(() => {
+    const fetched = series?.points ?? [];
+    const lastFetched = fetched.at(-1)?.t;
+    // Sunucudan gelen son noktadan yeni olanları ekle
+    const fresh = lastFetched
+      ? livePoints.filter((point) => point.t > lastFetched)
+      : livePoints;
+    return [...fetched, ...fresh];
+  }, [series, livePoints]);
+
+  const chartData = points.map((point) => ({
+    time: formatTime(point.t),
+    value: point.v,
+  }));
+
+  const latest = live?.value ?? points.at(-1)?.v;
 
   // I²C sensörlerin (BMP180 gibi) GPIO pini yoktur; Arduino bunları her
   // ölçüm turunda kendiliğinden okur, elle tetiklenecek bir pin bulunmaz.
