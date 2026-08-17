@@ -497,6 +497,18 @@ class Simulator:
                 await robot.start()
             return robot
 
+    async def stop_device(self, device_id: str) -> None:
+        """Tek bir cihazın sanal robotunu durdurur.
+
+        Gerçek köprü ajanı bağlandığında çağrılır: aksi halde sanal robot da
+        veri üretmeye devam eder ve grafiklerde iki kaynak karışır.
+        """
+        async with self._lock:
+            robot = self._robots.pop(device_id, None)
+        if robot is not None:
+            await robot.stop()
+            logger.info("Gerçek ajan bağlandı, simülatör durduruldu: %s", device_id)
+
     async def stop_all(self) -> None:
         async with self._lock:
             for robot in self._robots.values():

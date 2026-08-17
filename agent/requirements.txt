@@ -1,0 +1,5 @@
+# Köprü ajanının bağımlılıkları — bilinçli olarak az tutuldu,
+# Raspberry Pi'de derleme gerektiren paket yok.
+pyserial==3.5
+httpx==0.28.1
+websockets==15.0.1

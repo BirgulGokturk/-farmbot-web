@@ -7,6 +7,8 @@
  */
 
 import type {
+  AgentStatus,
+  AgentTokenResponse,
   AlertRule,
   AlertRuleInput,
   AppNotification,
@@ -324,6 +326,15 @@ export const api = {
       }),
   },
 
+  agent: {
+    status: (deviceId: string) =>
+      request<AgentStatus>(`/devices/${deviceId}/agent-status`),
+    createToken: (deviceId: string) =>
+      request<AgentTokenResponse>(`/devices/${deviceId}/agent-token`, { method: "POST" }),
+    revokeToken: (deviceId: string) =>
+      request<AgentStatus>(`/devices/${deviceId}/agent-token`, { method: "DELETE" }),
+  },
+
   alerts: {
     rules: (deviceId: string) => request<AlertRule[]>(`/devices/${deviceId}/alert-rules`),
     createRule: (deviceId: string, input: AlertRuleInput) =>
@@ -462,6 +473,12 @@ export const api = {
       request<CommandResponse>(`/devices/${deviceId}/control/pin/read`, {
         method: "POST",
         body: { pin, mode },
+      }),
+    /** Servoyu belirtilen açıya götürür (SG-5010: 0–180°). */
+    setServo: (deviceId: string, pin: number, angle: number) =>
+      request<CommandResponse>(`/devices/${deviceId}/control/servo`, {
+        method: "POST",
+        body: { pin, angle },
       }),
     water: (
       deviceId: string,

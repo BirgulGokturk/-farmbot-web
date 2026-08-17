@@ -213,18 +213,53 @@ export interface Peripheral {
   pin: number;
   mode: number;
   icon: string;
+  kind: PeripheralKind;
+  /** Servo aç/kapa anahtarının geçiş yaptığı iki açı */
+  servo_open_angle: number;
+  servo_closed_angle: number;
 }
+
+/** Sensörün ne ölçtüğü — birim, ikon ve gruplama bunu izler. */
+export type SensorKind =
+  | "temperature"
+  | "humidity"
+  | "soil_moisture"
+  | "pressure"
+  | "altitude"
+  | "rain"
+  | "light"
+  | "generic";
 
 export interface Sensor {
   id: string;
   device_id: string;
   label: string;
-  pin: number;
+  /** Köprü ajanının ölçümü eşleştirdiği anahtar, ör. "dht_humidity" */
+  channel: string;
+  kind: SensorKind;
+  /** I²C sensörlerde pin yoktur */
+  pin: number | null;
   mode: number;
   unit: string;
   icon: string;
   min_value: number;
   max_value: number;
+}
+
+/** Çevre biriminin sürülme biçimi. */
+export type PeripheralKind = "digital" | "pwm" | "servo";
+
+export interface AgentStatus {
+  has_token: boolean;
+  token_created_at: string | null;
+  connected: boolean;
+  last_seen_at: string | null;
+}
+
+export interface AgentTokenResponse {
+  token: string;
+  created_at: string;
+  note: string;
 }
 
 export interface SensorReading {

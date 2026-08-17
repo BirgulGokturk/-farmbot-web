@@ -23,6 +23,7 @@ from app.schemas.control import (
     PinReadRequest,
     PinWriteRequest,
     RawCommandRequest,
+    ServoRequest,
     SurveyRequest,
     WaterPointRequest,
 )
@@ -124,6 +125,16 @@ async def write_pin(payload: PinWriteRequest, device: OwnedDevice) -> CommandRes
 @router.post("/pin/read", response_model=CommandResponse)
 async def read_pin(payload: PinReadRequest, device: OwnedDevice) -> CommandResponse:
     return await _dispatch(device, [commands.read_pin(payload.pin, payload.mode)])
+
+
+@router.post("/servo", response_model=CommandResponse)
+async def set_servo(payload: ServoRequest, device: OwnedDevice) -> CommandResponse:
+    """Servoyu belirtilen açıya götürür.
+
+    Kilit hareketi engellemez: servo gantry'yi hareket ettirmez, vana/kapak
+    gibi bir işlevi vardır ve acil durumda kapatılabilmesi gerekir.
+    """
+    return await _dispatch(device, [commands.set_servo_angle(payload.pin, payload.angle)])
 
 
 # --------------------------------------------------------------------------- #

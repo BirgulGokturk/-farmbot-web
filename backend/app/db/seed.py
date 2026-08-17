@@ -19,7 +19,8 @@ from app.models import (
     Tool,
     User,
 )
-from app.models.enums import SunRequirement
+from app.models.enums import PeripheralKind, SunRequirement
+from app.services.channels import describe_channel
 
 logger = logging.getLogger(__name__)
 
@@ -112,15 +113,36 @@ async def seed_demo_account(session: AsyncSession) -> None:
             Peripheral(device_id=device.id, label="Su Pompası", pin=8, icon="💧"),
             Peripheral(device_id=device.id, label="Vakum Pompası", pin=9, icon="🌀"),
             Peripheral(device_id=device.id, label="LED Aydınlatma", pin=7, icon="💡"),
+            # SG-5010 servo — şimdilik yalnızca aç/kapa; görevi sonra belirlenecek
+            Peripheral(
+                device_id=device.id,
+                label="Servo (SG-5010)",
+                pin=6,
+                icon="🔀",
+                kind=PeripheralKind.SERVO,
+                servo_open_angle=90,
+                servo_closed_angle=0,
+            ),
         ]
     )
+    # Kanallar gerçek donanımla birebir aynı: köprü ajanı bağlandığında
+    # ölçümler doğrudan bu kayıtlara düşer, elle eşleştirme gerekmez.
     session.add_all(
         [
-            Sensor(device_id=device.id, label="Toprak Nemi", pin=59, unit="%", icon="💧"),
-            Sensor(device_id=device.id, label="Sıcaklık", pin=60, unit="°C", icon="🌡️",
-                   min_value=-10, max_value=50),
-            Sensor(device_id=device.id, label="Işık", pin=61, unit="lux", icon="☀️",
-                   min_value=0, max_value=10000),
+            Sensor(device_id=device.id, channel=channel, label=spec.label, kind=spec.kind,
+                   unit=spec.unit, icon=spec.icon,
+                   min_value=spec.min_value, max_value=spec.max_value,
+                   pin=pin)
+            for channel, pin in (
+                ("hw103_soil", 59),          # HW-103 analog çıkış
+                ("hw103_rain", 62),          # HW-103 dijital çıkış
+                ("dht_temperature", 63),     # DHT11/DHT22 tek hat
+                ("dht_humidity", 63),
+                ("bmp180_temperature", None),  # BMP180 I²C — pin yok
+                ("bmp180_pressure", None),
+                ("bmp180_altitude", None),
+            )
+            for spec in (describe_channel(channel),)
         ]
     )
     session.add_all(

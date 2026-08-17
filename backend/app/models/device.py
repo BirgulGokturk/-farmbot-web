@@ -45,6 +45,13 @@ class Device(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     mqtt_username: Mapped[str | None] = mapped_column(String(120))
     mqtt_password_hash: Mapped[str | None] = mapped_column(String(255))
 
+    # --- Raspberry Pi köprü ajanının kimliği ---
+    # Ajan kullanıcı parolası taşımaz; cihaza özel bir token kullanır.
+    # Token yalnızca üretildiği anda düz metin gösterilir, veritabanında hash tutulur.
+    agent_token_hash: Mapped[str | None] = mapped_column(String(255))
+    agent_token_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    agent_last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # --- Son bilinen durum (MQTT'den güncellenen önbellek) ---
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -62,9 +69,21 @@ class Device(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     @property
     def is_online(self) -> bool:
-        """Son 60 saniye içinde haber alındıysa çevrimiçi say."""
+        """Son 60 saniye içinde haber alındıysa çevrimiçi say.
+
+        SQLite saat dilimi bilgisini saklamaz; okunan değer "naive" gelir.
+        Zaman dilimli bir tarihten naive tarih çıkarmak TypeError verdiği için
+        önce UTC varsayımıyla normalize ediyoruz.
+        """
         if self.last_seen_at is None:
             return False
+
+        from datetime import timezone
+
         from app.db.base import utcnow
 
-        return (utcnow() - self.last_seen_at).total_seconds() < 60
+        last_seen = self.last_seen_at
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+
+        return (utcnow() - last_seen).total_seconds() < 60

@@ -110,8 +110,12 @@ function SensorCard({ sensor, hours }: { sensor: Sensor; hours: number }) {
 
   const latest = live?.value ?? series?.points.at(-1)?.v;
 
+  // I²C sensörlerin (BMP180 gibi) GPIO pini yoktur; Arduino bunları her
+  // ölçüm turunda kendiliğinden okur, elle tetiklenecek bir pin bulunmaz.
+  const canReadOnDemand = sensor.pin !== null;
+
   async function readNow() {
-    if (!deviceId) return;
+    if (!deviceId || sensor.pin === null) return;
     setReading(true);
     try {
       await api.control.readPin(deviceId, sensor.pin, sensor.mode);
@@ -128,21 +132,27 @@ function SensorCard({ sensor, hours }: { sensor: Sensor; hours: number }) {
     <Card>
       <CardHeader
         title={sensor.label}
-        subtitle={`GPIO ${sensor.pin} · ${sensor.mode === 1 ? "analog" : "dijital"}`}
+        subtitle={
+          sensor.pin !== null
+            ? `GPIO ${sensor.pin} · ${sensor.mode === 1 ? "analog" : "dijital"}`
+            : `I²C · ${sensor.channel}`
+        }
         icon={<span className="text-lg">{sensor.icon}</span>}
         action={
           <div className="flex items-center gap-2">
             <Badge tone={latest !== undefined ? "brand" : "neutral"}>
               {latest !== undefined ? `${latest.toFixed(1)} ${sensor.unit}` : "veri yok"}
             </Badge>
-            <Button
-              size="sm"
-              icon={<RefreshCw className="size-3.5" />}
-              loading={reading}
-              onClick={readNow}
-            >
-              Oku
-            </Button>
+            {canReadOnDemand && (
+              <Button
+                size="sm"
+                icon={<RefreshCw className="size-3.5" />}
+                loading={reading}
+                onClick={readNow}
+              >
+                Oku
+              </Button>
+            )}
           </div>
         }
       />

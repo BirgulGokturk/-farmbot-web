@@ -27,6 +27,32 @@ class PlantStage(str, Enum):
     REMOVED = "removed"      # kaldırıldı
 
 
+class SensorKind(str, Enum):
+    """Sensörün ne ölçtüğü.
+
+    Birim, ikon ve renk seçimini bu belirler. Aynı fiziksel büyüklüğü ölçen
+    iki sensör olabilir (BMP180 kart sıcaklığı ile DHT hava sıcaklığı gibi);
+    bu yüzden tür ayrımı `channel` alanıyla birlikte kullanılır.
+    """
+
+    TEMPERATURE = "temperature"      # °C
+    HUMIDITY = "humidity"            # % (ortam nemi)
+    SOIL_MOISTURE = "soil_moisture"  # % (toprak nemi)
+    PRESSURE = "pressure"            # hPa
+    ALTITUDE = "altitude"            # m
+    RAIN = "rain"                    # 0/1 (yağmur var/yok)
+    LIGHT = "light"                  # lux
+    GENERIC = "generic"
+
+
+class PeripheralKind(str, Enum):
+    """Çevre biriminin sürülme biçimi."""
+
+    DIGITAL = "digital"  # aç/kapa (röle, pompa, lamba)
+    PWM = "pwm"          # 0–255 arası analog çıkış
+    SERVO = "servo"      # 0–180° açı
+
+
 class CurveType(str, Enum):
     WATER = "water"
     SPREAD = "spread"

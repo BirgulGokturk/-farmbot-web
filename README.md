@@ -64,6 +64,7 @@ cd frontend && npm install && npm run dev
 
 ## Dokümantasyon
 
+- [Köprü Ajanı Kurulumu](agent/README.md) — Arduino bağlantı şeması, Raspberry Pi kurulumu, sorun giderme
 - [Mimari](docs/ARCHITECTURE.md) — sistem tasarımı, klasör yapısı, teknoloji gerekçeleri
 - [Veritabanı](docs/DATABASE.md) — şema, tablolar, ilişkiler
 - [MQTT Protokolü](docs/MQTT.md) — robot haberleşmesi, komut listesi

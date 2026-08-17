@@ -7,6 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.models.enums import PeripheralKind, SensorKind
 from app.schemas.common import ORMModel
 
 
@@ -15,6 +16,18 @@ class PeripheralCreate(BaseModel):
     pin: int = Field(ge=0, le=69)
     mode: int = Field(default=0, ge=0, le=1)
     icon: str = "💡"
+    kind: PeripheralKind = PeripheralKind.DIGITAL
+    servo_open_angle: int = Field(default=90, ge=0, le=180)
+    servo_closed_angle: int = Field(default=0, ge=0, le=180)
+
+
+class PeripheralUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=120)
+    pin: int | None = Field(default=None, ge=0, le=69)
+    icon: str | None = None
+    kind: PeripheralKind | None = None
+    servo_open_angle: int | None = Field(default=None, ge=0, le=180)
+    servo_closed_angle: int | None = Field(default=None, ge=0, le=180)
 
 
 class PeripheralRead(ORMModel):
@@ -24,11 +37,18 @@ class PeripheralRead(ORMModel):
     pin: int
     mode: int
     icon: str
+    kind: PeripheralKind
+    servo_open_angle: int
+    servo_closed_angle: int
 
 
 class SensorCreate(BaseModel):
     label: str = Field(min_length=1, max_length=120)
-    pin: int = Field(ge=0, le=69)
+    # Köprü ajanının ölçümü eşleştirdiği anahtar, ör. "dht_humidity"
+    channel: str = Field(default="", max_length=80)
+    kind: SensorKind = SensorKind.GENERIC
+    # I²C sensörlerde pin yoktur
+    pin: int | None = Field(default=None, ge=0, le=69)
     mode: int = Field(default=1, ge=0, le=1)
     unit: str = ""
     icon: str = "📊"
@@ -40,7 +60,9 @@ class SensorRead(ORMModel):
     id: uuid.UUID
     device_id: uuid.UUID
     label: str
-    pin: int
+    channel: str
+    kind: SensorKind
+    pin: int | None
     mode: int
     unit: str
     icon: str

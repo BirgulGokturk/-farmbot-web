@@ -18,6 +18,7 @@ import { JogPad } from "@/components/control/JogPad";
 import { api } from "@/lib/api";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
 import { useBot } from "@/store/useBot";
+import type { Peripheral } from "@/lib/types";
 
 export default function ManualControl() {
   const deviceId = useDeviceId();
@@ -112,10 +113,7 @@ export default function ManualControl() {
                   <PeripheralSwitch
                     key={peripheral.id}
                     deviceId={deviceId}
-                    id={peripheral.id}
-                    label={peripheral.label}
-                    pin={peripheral.pin}
-                    icon={peripheral.icon}
+                    peripheral={peripheral}
                   />
                 ))}
               </ul>
@@ -268,30 +266,48 @@ function GoToCoordinate() {
   );
 }
 
-/** Bir GPIO çıkışını açıp kapatan anahtar. Pin durumu robotun durum ağacından okunur. */
+/**
+ * Bir çevre birimini süren anahtar.
+ *
+ * Dijital birimlerde pin 0/1 yazılır; **servo** birimlerinde ise kayıtlı
+ * açık/kapalı açıları arasında geçiş yapılır. Servo bir açı motorudur,
+ * yüksek/alçak seviye anlamı taşımaz.
+ */
 function PeripheralSwitch({
   deviceId,
-  label,
-  pin,
-  icon,
+  peripheral,
 }: {
   deviceId: string | null;
-  id: string;
-  label: string;
-  pin: number;
-  icon: string;
+  peripheral: Peripheral;
 }) {
+  const { label, pin, icon, kind, servo_open_angle, servo_closed_angle } = peripheral;
+
   const pinState = useBot((s) => s.status?.pins?.[String(pin)]);
   const [optimistic, setOptimistic] = useState<boolean | null>(null);
 
+  const isServo = kind === "servo";
+  // Servoda "açık" demek, pin değerinin açık açısına yakın olması demek
+  const reported = pinState?.value ?? 0;
+  const actual = isServo
+    ? Math.abs(reported - servo_open_angle) < Math.abs(reported - servo_closed_angle)
+    : reported > 0;
+
   // Robottan gelen gerçek durum, iyimser tahmini geçersiz kılar
-  const isOn = optimistic ?? (pinState?.value ?? 0) > 0;
+  const isOn = optimistic ?? actual;
 
   async function toggle(next: boolean) {
     if (!deviceId) return;
     setOptimistic(next);
     try {
-      await api.control.writePin(deviceId, { pin, value: next ? 1 : 0, mode: 0 });
+      if (isServo) {
+        await api.control.setServo(
+          deviceId,
+          pin,
+          next ? servo_open_angle : servo_closed_angle,
+        );
+      } else {
+        await api.control.writePin(deviceId, { pin, value: next ? 1 : 0, mode: 0 });
+      }
     } catch (error) {
       setOptimistic(null); // geri al
       toast.error(`${label} değiştirilemedi`, (error as Error).message);
@@ -307,7 +323,10 @@ function PeripheralSwitch({
         <span className="text-base">{icon}</span>
         <span className="min-w-0">
           <span className="block truncate text-sm text-content">{label}</span>
-          <span className="font-mono text-xs text-subtle">pin {pin}</span>
+          <span className="font-mono text-xs text-subtle">
+            pin {pin}
+            {isServo && ` · ${servo_closed_angle}° ↔ ${servo_open_angle}°`}
+          </span>
         </span>
       </span>
       <Toggle checked={isOn} onChange={toggle} label={label} disabled={!deviceId} />

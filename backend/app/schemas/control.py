@@ -55,6 +55,11 @@ class WaterPointRequest(BaseModel):
     speed: int = Field(default=100, ge=1, le=100)
 
 
+class ServoRequest(BaseModel):
+    pin: int = Field(ge=0, le=69)
+    angle: int = Field(ge=0, le=180)
+
+
 class SurveyRequest(BaseModel):
     """Isı haritası için ızgara taraması."""
 

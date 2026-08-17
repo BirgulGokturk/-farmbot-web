@@ -12,6 +12,7 @@ import {
   Toggle,
 } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
+import { AgentSetup } from "@/components/settings/AgentSetup";
 import { AlertRules } from "@/components/settings/AlertRules";
 import { api } from "@/lib/api";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
@@ -37,6 +38,7 @@ export default function SettingsPage() {
       <div className="grid gap-5 lg:grid-cols-2">
         {device && <DeviceSettings device={device} />}
         {device && <WorkspaceSettings device={device} />}
+        <AgentSetup />
         <HardwareSettings />
         <AlertRules />
 

@@ -1,18 +1,37 @@
-"""Donanım pinleri: çevre birimleri (çıkış), sensörler (giriş) ve okumaları."""
+"""Donanım: çevre birimleri (çıkış), sensörler (giriş) ve okumaları.
+
+Sensörler **kanal adıyla** tanımlanır (`channel`), GPIO piniyle değil.
+Sebep: BMP180 gibi I²C sensörlerin pin numarası yoktur ve tek bir modül
+birden fazla büyüklük ölçer (basınç + sıcaklık + rakım). Kanal adı, Arduino
+yazılımındaki alan adıyla birebir eşleşir — köprü ajanı gelen JSON'u bu adla
+doğru sensöre bağlar.
+"""
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, Integer, String, Uuid
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    Enum as SAEnum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.enums import PeripheralKind, SensorKind
 
 
 class Peripheral(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """GPIO çıkışı — su pompası, vana, lamba, vakum pompası…"""
+    """Çıkış birimi — su pompası, vana, lamba, servo."""
 
     __tablename__ = "peripherals"
 
@@ -24,36 +43,57 @@ class Peripheral(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     mode: Mapped[int] = mapped_column(Integer, default=0)  # 0 = dijital, 1 = analog
     icon: Mapped[str] = mapped_column(String(16), default="💡")
 
+    kind: Mapped[PeripheralKind] = mapped_column(
+        SAEnum(PeripheralKind, native_enum=False), default=PeripheralKind.DIGITAL
+    )
+
+    # --- Yalnızca servo için ---
+    # Aç/kapa anahtarı bu iki açı arasında geçiş yapar. Mekanik hazır olmadığı
+    # için varsayılanlar güvenli uçlar; kalibrasyon sonrası Ayarlar'dan değişir.
+    servo_open_angle: Mapped[int] = mapped_column(Integer, default=90)
+    servo_closed_angle: Mapped[int] = mapped_column(Integer, default=0)
+
 
 class Sensor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """GPIO girişi — toprak nemi, sıcaklık, ışık, su akışı…"""
+    """Giriş birimi — toprak nemi, sıcaklık, basınç, ışık…"""
 
     __tablename__ = "sensors"
+    __table_args__ = (
+        # Köprü ajanı kanal adıyla eşleştirme yapar; cihaz içinde tekil olmalı
+        UniqueConstraint("device_id", "channel", name="uq_sensors_device_channel"),
+    )
 
     device_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("devices.id", ondelete="CASCADE"), index=True
     )
     label: Mapped[str] = mapped_column(String(120), nullable=False)
-    pin: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Arduino yazılımındaki alan adı, ör. "bmp180_pressure", "dht_humidity"
+    channel: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    kind: Mapped[SensorKind] = mapped_column(
+        SAEnum(SensorKind, native_enum=False), default=SensorKind.GENERIC
+    )
+
+    # I²C sensörlerde pin yoktur
+    pin: Mapped[int | None] = mapped_column(Integer)
     mode: Mapped[int] = mapped_column(Integer, default=1)  # 0 = dijital, 1 = analog
+
     unit: Mapped[str] = mapped_column(String(20), default="")
     icon: Mapped[str] = mapped_column(String(16), default="📊")
-    # Ham ADC değerini (0–1023) anlamlı birime ölçeklemek için
+    # Grafik ekseni ve ısı haritası renk ölçeği bu aralığa göre çizilir
     min_value: Mapped[float] = mapped_column(Float, default=0.0)
     max_value: Mapped[float] = mapped_column(Float, default=100.0)
 
 
 class SensorReading(TimestampMixin, Base):
-    """Zaman serisi telemetri. Hacim yüksek olduğu için birincil anahtar bigserial."""
+    """Zaman serisi telemetri. Hacim yüksek olduğu için bigserial anahtar."""
 
     __tablename__ = "sensor_readings"
     __table_args__ = (
         Index("ix_readings_device_sensor_time", "device_id", "sensor_id", "read_at"),
     )
 
-    # SQLite yalnızca `INTEGER PRIMARY KEY` sütunlarını otomatik artırır; BIGINT
-    # kullanılırsa satır eklerken NOT NULL hatası verir. SQLite'ın INTEGER'ı zaten
-    # 64 bittir, dolayısıyla varyant kullanmak kapasiteden ödün vermez.
+    # SQLite BIGINT birincil anahtarı otomatik artırmaz; yalnızca INTEGER artırır
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
     )
@@ -66,7 +106,7 @@ class SensorReading(TimestampMixin, Base):
     pin: Mapped[int | None] = mapped_column(Integer)
     value: Mapped[float] = mapped_column(Float, nullable=False)
 
-    # Ölçüm anındaki robot konumu — "hangi bitkinin yanında ölçüldü" sorusu için
+    # Ölçüm anındaki robot konumu — ısı haritası bunu kullanır
     x: Mapped[float | None] = mapped_column(Float)
     y: Mapped[float | None] = mapped_column(Float)
     z: Mapped[float | None] = mapped_column(Float)
