@@ -595,6 +595,13 @@ def main() -> int:
         format="%(asctime)s  %(levelname)-7s %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    # httpx her isteği INFO olarak yazıyor. Gantry Studio saniyede iki kez
+    # yoklandığı için journalctl dakikalar içinde bu satırlarla doluyor ve
+    # gerçek mesajlar kayboluyor. Yalnızca hataları görelim.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("websockets").setLevel(logging.WARNING)
     try:
         return asyncio.run(main_async(args))
     except KeyboardInterrupt:
