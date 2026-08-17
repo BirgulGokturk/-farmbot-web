@@ -8,6 +8,7 @@
 import { create } from "zustand";
 
 import { DeviceSocket } from "@/lib/ws";
+import { toast } from "@/components/ui/toast";
 import type { DeviceStatus, LogEntry, SocketMessage } from "@/lib/types";
 
 /** Kayıtlar ekranı açılmadan da son olaylar elde kalsın diye tutulan tampon. */
@@ -60,6 +61,14 @@ export const useBot = create<BotState>((set, get) => ({
         case "log": {
           const entry: LiveLog = { ...message.payload, id: `live-${++logCounter}` };
           set((state) => ({ logs: [entry, ...state.logs].slice(0, LOG_BUFFER_SIZE) }));
+
+          // Robot bir komutu reddettiğinde kullanıcı bunu hemen görmeli.
+          // Hareket komutları yanıt beklemeden gönderildiği için hata mesajı
+          // istek yanıtında dönmüyor; robottan log olarak geliyor.
+          if (entry.channels?.includes("toast")) {
+            if (entry.level === "error") toast.error("Robot", entry.message);
+            else if (entry.level === "warn") toast.warning("Robot", entry.message);
+          }
           break;
         }
 

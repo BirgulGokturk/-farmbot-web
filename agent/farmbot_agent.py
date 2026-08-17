@@ -395,6 +395,22 @@ class Agent:
             ok, error = False, str(exc)
             logger.error("Komut uygulanamadı: %s", exc)
 
+            # Hatayı panele de bildir.
+            # Hareket komutlarında yanıt beklenmediği için `rpc_result` kullanıcıya
+            # ulaşmıyor; hata yalnızca Pi'nin günlüğünde kalıyordu. Kullanıcı
+            # düğmeye basıp hiçbir şey olmadığını görüyor, sebebini bilmiyordu.
+            await self._send_cloud(
+                {
+                    "type": "log",
+                    "payload": {
+                        "message": f"Komut uygulanamadı: {error}",
+                        "level": "error",
+                        "channels": ["toast", "ticker"],
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                }
+            )
+
         try:
             await socket.send(
                 json.dumps(
