@@ -1,13 +1,13 @@
-﻿[Unit]
-Description=FarmBot kÃ¶prÃ¼ ajanÄ± (Arduino â†’ bulut)
-# AÄŸ hazÄ±r olmadan baÅŸlarsa ilk gÃ¶nderimler tampona dÃ¼ÅŸer; beklemek daha temiz
+[Unit]
+Description=FarmBot köprü ajanı (Arduino -> bulut)
+# Ağ hazır olmadan başlarsa ilk gönderimler tampona düşer; beklemek daha temiz
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 
-# --- DÃœZENLEYÄ°N ---
+# --- DÜZENLEYİN ---
 User=pi
 WorkingDirectory=/home/pi/-farmbot-web/agent
 Environment=FARMBOT_SERIAL_PORT=/dev/ttyUSB0
@@ -18,15 +18,14 @@ Environment=FARMBOT_DEVICE_TOKEN=fbt_BURAYA_TOKEN_YAPISTIRIN
 
 ExecStart=/home/pi/-farmbot-web/agent/.venv/bin/python farmbot_agent.py
 
-# Ajan Ã§Ã¶kerse ya da Arduino Ã§Ä±karÄ±lÄ±rsa kendiliÄŸinden toparlansÄ±n
+# Ajan çökerse ya da Arduino çıkarılırsa kendiliğinden toparlansın
 Restart=always
 RestartSec=5
 
-# GÃ¼nlÃ¼kler journalctl'e dÃ¼ÅŸsÃ¼n
+# Günlükler journalctl'e düşsün
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=farmbot-agent
 
 [Install]
 WantedBy=multi-user.target
-
