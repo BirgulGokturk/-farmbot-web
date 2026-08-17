@@ -14,13 +14,20 @@
 
 // Sürüm değişince eski önbellek silinir. Yeni yayında bu satırı artırmak
 // istemcilerin güncel dosyaları almasını garantiler.
-const CACHE = "farmbot-shell-v1";
+const CACHE = "farmbot-shell-v2";
 
-// Uygulama kabuğunun çekirdeği. Vite dosya adlarına özet (hash) eklediği için
-// asıl JS/CSS burada sayfa açıldıkça öğreniliyor.
+/*
+ * Kurulumda YALNIZCA sürümden bağımsız varlıklar önbelleğe alınır.
+ *
+ * index.html bilerek dışarıda: Vite, JS/CSS adlarına özet (hash) ekliyor.
+ * Kurulumda index.html'i alsaydık, o sayfanın gösterdiği JS dosyaları
+ * önbellekte olmazdı; yeni bir sürüm yayınlanınca eski kabuk artık silinmiş
+ * bir dosyayı istemeye devam eder ve uygulama hiç açılmazdı.
+ *
+ * Bunun yerine index.html ilk BAŞARILI ziyarette önbelleğe alınıyor — o an
+ * JS/CSS dosyaları da indiği için kabuk ile varlıkları tutarlı oluyor.
+ */
 const CORE = [
-  "/",
-  "/index.html",
   "/manifest.webmanifest",
   "/icon-192.png",
   "/icon-512.png",
@@ -66,8 +73,12 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put("/index.html", copy));
+          // Yalnızca gerçekten başarılı bir yanıtı sakla. Hata sayfasını
+          // önbelleğe alırsak kullanıcı kalıcı olarak ona takılır.
+          if (response && response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE).then((cache) => cache.put("/index.html", copy));
+          }
           return response;
         })
         .catch(() => caches.match("/index.html").then((cached) => cached || offlineResponse())),
