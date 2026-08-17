@@ -50,13 +50,23 @@ FLUSH_INTERVAL_SECONDS = 15.0
 
 
 class SerialLink:
-    """Arduino ile satır bazlı JSON konuşan seri bağlantı.
+    """Arduino ile konuşan seri bağlantı.
+
+    Arduino iki tür satır basar:
+      * insan için Türkçe metin  ("Hava Nemi: %54.00 | ...")  → yok sayılır
+      * makine için önekli satır ("VERI:{...}", "CEVAP:{...}") → ayrıştırılır
+
+    Bu ayrım sayesinde Seri Monitör'den kod hâlâ okunabilir kalıyor ama köprü
+    yalnızca ihtiyacı olan satırları alıyor.
 
     `pyserial` eşzamanlıdır; olay döngüsünü bloklamamak için okuma ve yazma
     ayrı iş parçacıklarında (`asyncio.to_thread`) yapılır.
     """
 
-    def __init__(self, port: str, baudrate: int = 115200) -> None:
+    # Arduino'nun makine okunabilir satır önekleri
+    PREFIXES = {"VERI:": "data", "CEVAP:": "ack", "HAZIR:": "hello"}
+
+    def __init__(self, port: str, baudrate: int = 9600) -> None:
         self.port = port
         self.baudrate = baudrate
         self._serial: serial.Serial | None = None
@@ -79,7 +89,7 @@ class SerialLink:
             self._serial = None
 
     async def read_line(self) -> dict[str, Any] | None:
-        """Bir satır okur ve JSON olarak çözer. Bozuk satırlar yok sayılır."""
+        """Bir satır okur. Önekli satırları çözer, diğerlerini yok sayar."""
         if self._serial is None:
             raise ConnectionError("Seri port kapalı")
 
@@ -91,18 +101,26 @@ class SerialLink:
         if not text:
             return None
 
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            # Açılış çıktısı ya da hata ayıklama satırı olabilir
-            logger.debug("JSON olmayan satır: %s", text[:120])
-            return None
+        for prefix, kind in self.PREFIXES.items():
+            if text.startswith(prefix):
+                body = text[len(prefix):]
+                try:
+                    return {"t": kind, "payload": json.loads(body)}
+                except json.JSONDecodeError:
+                    logger.warning("Bozuk %s satırı: %s", prefix, body[:120])
+                    return None
 
-    async def write(self, payload: dict[str, Any]) -> None:
+        # Türkçe durum satırları — kullanıcının Seri Monitör'de gördüğü çıktı.
+        # Ayrıntılı kipte günlüğe yazıyoruz ki uzaktan da izlenebilsin.
+        logger.debug("Arduino: %s", text[:160])
+        return None
+
+    async def write_command(self, command: str) -> None:
+        """Arduino'ya metin komutu gönderir (ör. "SERVO 90")."""
         if self._serial is None:
             raise ConnectionError("Seri port kapalı")
 
-        line = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+        line = (command.strip() + "\n").encode("utf-8")
         # Aynı anda iki komut yazılırsa satırlar iç içe girer
         async with self._write_lock:
             await asyncio.to_thread(self._serial.write, line)
@@ -162,13 +180,19 @@ class Agent:
                 continue
 
             kind = message.get("t")
+            payload = message.get("payload") or {}
 
             if kind == "data":
-                self._buffer_readings(message.get("readings") or {})
+                self._buffer_readings(payload)
             elif kind == "ack":
-                self._resolve_ack(message)
+                self._resolve_ack(payload)
             elif kind == "hello":
-                logger.info("Arduino hazır: %s", json.dumps(message, ensure_ascii=False))
+                logger.info("Arduino hazır: %s", json.dumps(payload, ensure_ascii=False))
+                if payload.get("bmp180") is False:
+                    logger.warning(
+                        "BMP180 bulunamadı — basınç, rakım ve kart sıcaklığı gelmeyecek. "
+                        "SDA→A4, SCL→A5 ve 3.3V beslemeyi kontrol edin."
+                    )
 
     def _buffer_readings(self, readings: dict[str, Any]) -> None:
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -182,10 +206,19 @@ class Agent:
                 {"channel": channel, "value": float(value), "read_at": timestamp}
             )
 
-    def _resolve_ack(self, message: dict[str, Any]) -> None:
-        future = self._pending.pop(str(message.get("id") or ""), None)
+    def _resolve_ack(self, payload: dict[str, Any]) -> None:
+        """Arduino komut onayı.
+
+        Arduino komutlara kimlik döndürmüyor (basit metin protokolü), bu yüzden
+        sıradaki bekleyen komutu eşleştiriyoruz. Komutlar seri porta tek tek ve
+        sırayla gönderildiği için bu güvenli.
+        """
+        if not self._pending:
+            return
+        label = next(iter(self._pending))
+        future = self._pending.pop(label, None)
         if future is not None and not future.done():
-            future.set_result(message)
+            future.set_result(payload)
 
     async def _reconnect_serial(self) -> None:
         await self.serial.close()
@@ -281,7 +314,7 @@ class Agent:
         )
 
     async def _apply_step(self, step: dict[str, Any]) -> None:
-        """CeleryScript adımını Arduino komutuna çevirir.
+        """CeleryScript adımını Arduino'nun metin komutuna çevirir.
 
         Arduino hareket edemez (gantry yok); yalnızca pin ve servo komutları
         anlamlıdır. Diğerleri sessizce yok sayılır ki dizi çalıştırmak hata vermesin.
@@ -290,40 +323,36 @@ class Agent:
         args = step.get("args") or {}
 
         if kind == "write_pin":
-            await self._send_arduino(
-                {"cmd": "pin", "pin": int(args.get("pin_number", 0)),
-                 "value": int(args.get("pin_value", 0))}
-            )
+            pin = int(args.get("pin_number", 0))
+            value = int(args.get("pin_value", 0))
+            await self._send_arduino(f"PIN {pin} {value}")
 
         elif kind == "set_servo_angle":
-            await self._send_arduino(
-                {"cmd": "servo", "angle": int(args.get("pin_value", 0))}
-            )
+            await self._send_arduino(f"SERVO {int(args.get('pin_value', 0))}")
 
         elif kind == "read_pin":
             # Arduino tüm kanalları birlikte yayınlar; tek pin okumak yerine
             # anlık bir ölçüm turu tetiklemek daha faydalı
-            await self._send_arduino({"cmd": "read"})
+            await self._send_arduino("OKU")
 
         else:
             logger.debug("Arduino düğümünde geçersiz adım yok sayıldı: %s", kind)
 
-    async def _send_arduino(self, payload: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
+    async def _send_arduino(self, command: str, timeout: float = 5.0) -> dict[str, Any]:
         """Komutu gönderir ve Arduino'nun onayını bekler."""
         import uuid
 
-        command_id = uuid.uuid4().hex[:8]
-        payload = {**payload, "id": command_id}
-
+        label = uuid.uuid4().hex[:8]
         future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-        self._pending[command_id] = future
+        self._pending[label] = future
 
-        await self.serial.write(payload)
+        logger.info("Arduino'ya komut: %s", command)
+        await self.serial.write_command(command)
 
         try:
             return await asyncio.wait_for(future, timeout)
         except asyncio.TimeoutError as exc:
-            self._pending.pop(command_id, None)
+            self._pending.pop(label, None)
             raise TimeoutError("Arduino komuta yanıt vermedi") from exc
 
     # ------------------------------------------------------------------ #
@@ -362,8 +391,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Arduino'nun seri portu (varsayılan: /dev/ttyUSB0, Uno R3 klonlarda genellikle bu)",
     )
     parser.add_argument(
-        "--baud", type=int, default=int(os.getenv("FARMBOT_BAUD", "115200")),
-        help="Seri hız (Arduino yazılımıyla aynı olmalı)",
+        "--baud", type=int, default=int(os.getenv("FARMBOT_BAUD", "9600")),
+        help="Seri hız — Arduino sketch'indeki Serial.begin() ile aynı olmalı (varsayılan 9600)",
     )
     parser.add_argument(
         "--api",

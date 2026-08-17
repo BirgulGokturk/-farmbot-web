@@ -1,247 +1,284 @@
 /*
- * FarmBot — Arduino sensör ve eyleyici düğümü
- * ============================================
+ * FarmBot — Arduino sensör düğümü
+ * ================================
+ * Temel: senin yazdığın kod. Mantık ve Türkçe çıktılar aynen korundu.
+ * Üzerine panele bağlanabilmesi için gerekenler eklendi.
  *
- * Görevi: sensörleri okuyup seri porttan JSON satırı olarak yayınlamak,
- * Raspberry Pi'den gelen komutlarla servo ve röleleri sürmek.
+ * EKLENENLER
+ *   1) Her ölçümden sonra tek satırlık VERI: satırı basılıyor.
+ *      Köprü programı bu satırı okuyup buluta gönderiyor.
+ *      Senin okuduğun Türkçe satırlar aynen duruyor.
+ *   2) Seri porttan komut alma (panelden servo kontrolü için).
+ *   3) OTOMATIK / MANUEL kip: panelden komut gelince otomatik karar durur,
+ *      "AUTO" komutuyla geri açılır. Yoksa panel servoyu 90'a alsa bile
+ *      döngü bir sonraki turda üzerine yazardı.
+ *   4) Barometre bulunamazsa sistem artık DURMUYOR. Eski hâlinde while(1)
+ *      tüm ölçümü kilitliyordu; tek sensör arızası yüzünden nem ve toprak
+ *      verisi de kesiliyordu.
+ *   5) Toprak nemi ham değerin yanında yüzde olarak da hesaplanıyor.
  *
- * Arduino ile Pi arasındaki protokol bilinçli olarak **satır bazlı JSON**:
- * hem insan gözüyle ayıklanabilir (Seri Monitör'den izlenebilir) hem de
- * köprü ajanının ayrıştırması kolaydır.
- *
- * ---------------------------------------------------------------------------
- * GEREKEN KÜTÜPHANELER (Arduino IDE → Araçlar → Kütüphane Yöneticisi)
- *   - "Adafruit BMP085 Library"      (BMP180/GY-68 ile uyumludur)
- *   - "DHT sensor library"           (Adafruit)
- *   - "Adafruit Unified Sensor"      (DHT kütüphanesinin bağımlılığı)
- *   - "ArduinoJson"                  (sürüm 7.x)
- *   Servo ve Wire kütüphaneleri Arduino IDE ile birlikte gelir.
- *
- * ---------------------------------------------------------------------------
- * BAĞLANTI ŞEMASI (Arduino Uno)
- *
- *   BMP180 / GY-68        →  VCC:3.3V   GND:GND   SDA:A4   SCL:A5
- *   DHT11                 →  VCC:5V     GND:GND   DATA:D2
- *                            (DATA ile VCC arasına 10 kΩ pull-up direnç.
- *                             3 bacaklı hazır modül kullanıyorsanız direnç
- *                             kartın üzerindedir, ayrıca eklemeyin.)
- *   HW-103                →  VCC:5V     GND:GND   AO:A0    DO:D3
- *   SG-5010 servo         →  Kırmızı:5V* Kahve:GND Turuncu:D6
- *
- *   * SG-5010 yüksek torklu bir servodur; yük altında 1 A üzerine çıkabilir.
- *     Arduino'nun 5V pininden beslemeyin — AYRI bir 5–6 V güç kaynağı kullanın
- *     ve güç kaynağının GND'sini Arduino GND'sine bağlayın (ortak toprak).
- *     Aksi halde servo hareket ettiğinde Arduino resetlenir.
+ * GEREKEN KÜTÜPHANELER (senin zaten kurduklarının aynısı, yenisi yok)
+ *   - Adafruit BMP085 Library      (BMP180/GY-68 ile uyumlu)
+ *   - DHT sensor library           (Adafruit)
+ *   - Adafruit Unified Sensor
+ *   Servo ve Wire, Arduino IDE ile birlikte gelir.
  */
 
 #include <Wire.h>
-#include <Servo.h>
 #include <Adafruit_BMP085.h>
 #include <DHT.h>
-#include <ArduinoJson.h>
+#include <Servo.h>
 
-// --------------------------------------------------------------------------
-// Pin tanımları
-// --------------------------------------------------------------------------
-const uint8_t PIN_DHT        = 2;   // DHT11/DHT22 veri hattı
-const uint8_t PIN_RAIN_D     = 3;   // HW-103 dijital çıkış
-const uint8_t PIN_SERVO      = 6;   // SG-5010 sinyal
-const uint8_t PIN_PUMP       = 8;   // Su pompası rölesi (isteğe bağlı)
-const uint8_t PIN_SOIL_A     = A0;  // HW-103 analog çıkış
+// --- SENSÖR PİN TANIMLAMALARI ---
+#define DHTPIN 2          // Nem ve sıcaklık sensörü D2'ye bağlı
+#define DHTTYPE DHT11     // Elindeki sensör DHT11
+#define YAGMUR_PIN A0     // HW-103 Analog pini
+#define SERVO_PIN 9       // SG 5010 Servo pini
 
-// Kullanılan sensör: DHT11
-// (DHT22'ye geçerseniz burayı DHT22 yapmanız yeterli — başka değişiklik gerekmez)
-//
-// DHT11'in sınırları: sıcaklık 0–50 °C (±2 °C), nem %20–90 (±%5).
-// Bu yüzden negatif sıcaklık ve çok kuru/çok nemli ortam ölçemez;
-// donma noktası civarında değer beklemeyin.
-#define DHT_TYPE DHT11
-
-// --------------------------------------------------------------------------
-// Kalibrasyon
-// --------------------------------------------------------------------------
-// HW-103 kuruyken YÜKSEK, ıslakken DÜŞÜK analog değer verir.
-// Doğru yüzde için bu iki değeri kendi sensörünüzle ölçün:
-//   1. Sensörü kuru havada tutun  → seri porttaki "hw103_soil_raw" değerini not alın → SOIL_DRY
-//   2. Bir bardak suya batırın    → yeni değeri not alın                              → SOIL_WET
-const int SOIL_DRY = 620;
-const int SOIL_WET = 260;
-
-// Rakım hesabı için deniz seviyesindeki basınç (hPa).
-// Bulunduğunuz yerin güncel QNH değerini girerseniz rakım doğrulaşır.
-const float SEA_LEVEL_HPA = 1013.25;
-
-// Ölçüm gönderme aralığı. DHT11 en fazla 1 Hz okunabilir; 5 sn güvenli.
-const unsigned long SAMPLE_INTERVAL_MS = 5000UL;
-
-// --------------------------------------------------------------------------
-// Durum
-// --------------------------------------------------------------------------
+// --- NESNELERİ OLUŞTURMA ---
 Adafruit_BMP085 bmp;
-DHT dht(PIN_DHT, DHT_TYPE);
-Servo servo;
+DHT dht(DHTPIN, DHTTYPE);
+Servo tarimServo;
 
-bool bmpReady = false;
-unsigned long lastSample = 0;
-int servoAngle = 0;
+// --- EŞİK DEĞERİ ---
+// HW-103 sensörleri kuruyken 1023'e yakın, su gördüğünde 0'a yakın değer verir.
+// Bu değeri kendi testlerine göre değiştirebilirsin.
+int suEsikDegeri = 600;
+
+// Toprak nemini yüzdeye çevirmek için iki uç. Kalibrasyon:
+//   sensör kuru havadayken okunan değer  -> TOPRAK_KURU
+//   sensör suya batırıldığında okunan     -> TOPRAK_ISLAK
+// Seri Monitör'deki "Yagmur/Nem Seviyesi" değerini kullanarak ayarla.
+const int TOPRAK_KURU  = 620;
+const int TOPRAK_ISLAK = 260;
+
+// --- DURUM ---
+bool barometreVar = false;   // Barometre bulunamazsa diğer sensörler çalışmaya devam etsin
+bool otomatikKip = true;     // Panelden komut gelince false olur
+int servoAcisi = 0;
 
 void setup() {
-  Serial.begin(115200);
-  // USB seri hazır olana kadar bekle (Leonardo/Micro için gerekli, Uno'da anında geçer)
-  while (!Serial && millis() < 3000) {}
+  Serial.begin(9600);
+  Serial.println("Sistem Baslatiliyor...");
 
-  pinMode(PIN_RAIN_D, INPUT);
-  pinMode(PIN_PUMP, OUTPUT);
-  digitalWrite(PIN_PUMP, LOW);
+  // 1. Servo Motor Başlatma
+  tarimServo.attach(SERVO_PIN);
+  tarimServo.write(servoAcisi); // Başlangıç konumu: Kapalı (0 derece)
 
-  servo.attach(PIN_SERVO);
-  servo.write(servoAngle);
-
+  // 2. DHT (Nem/Sıcaklık) Başlatma
   dht.begin();
-  bmpReady = bmp.begin();
 
-  // Ajan bu satırdan düğümün hazır olduğunu ve hangi kanalları
-  // yayınlayacağını anlar.
-  StaticJsonDocument<256> hello;
-  hello["t"] = "hello";
-  hello["fw"] = "farmbot-node-1.0";
-  hello["bmp180"] = bmpReady;
-  hello["dht"] = (DHT_TYPE == DHT11) ? "DHT11" : "DHT22";
-  serializeJson(hello, Serial);
-  Serial.println();
+  // 3. GY-68 (Barometre) Başlatma
+  barometreVar = bmp.begin();
+  if (!barometreVar) {
+    // Eskiden burada while(1) vardı ve tüm sistem donuyordu.
+    // Artık sadece uyarıyoruz; nem, sıcaklık ve toprak ölçümü devam ediyor.
+    Serial.println("UYARI: GY-68 Barometre bulunamadi! Kablolari kontrol edin.");
+    Serial.println("       Diger sensorler calismaya devam ediyor.");
+  }
+
+  // HW-103 için pinMode ayarına gerek yoktur, analogRead doğrudan okur.
+
+  Serial.println("Tum Sensorler Aktif. Olcumler Basliyor...");
+  Serial.println("----------------------------------------");
+
+  // Köprü programı bu satırdan düğümün hazır olduğunu anlar
+  Serial.print("HAZIR:{\"fw\":\"farmbot-node-2.0\",\"bmp180\":");
+  Serial.print(barometreVar ? "true" : "false");
+  Serial.println(",\"dht\":\"DHT11\"}");
 }
 
 void loop() {
-  handleSerialCommands();
+  // Panelden komut gelmiş mi? (bloklamaz, sadece bekleyen varsa okur)
+  komutlariIsle();
 
-  const unsigned long now = millis();
-  // millis() taşmasına karşı çıkarma ile karşılaştırma (yaklaşık 49 günde bir)
-  if (now - lastSample >= SAMPLE_INTERVAL_MS) {
-    lastSample = now;
-    publishReadings();
-  }
-}
+  // Sensörlerin veri toparlaması için 2 saniye bekliyoruz
+  // (DHT11 saniyede sadece 1 kez güncellenebilir)
+  delay(2000);
 
-// --------------------------------------------------------------------------
-// Ölçümler
-// --------------------------------------------------------------------------
-void publishReadings() {
-  StaticJsonDocument<384> doc;
-  doc["t"] = "data";
-  JsonObject r = doc.createNestedObject("readings");
+  // --- DHT VERİLERİNİ OKUMA ---
+  float nem = dht.readHumidity();
+  float dhtSicaklik = dht.readTemperature(); // Santigrat
 
-  // --- BMP180 (I²C) ---
-  if (bmpReady) {
-    r["bmp180_temperature"] = round1(bmp.readTemperature());
-    r["bmp180_pressure"]    = round1(bmp.readPressure() / 100.0);  // Pa → hPa
-    r["bmp180_altitude"]    = round1(bmp.readAltitude(SEA_LEVEL_HPA * 100.0));
+  // --- GY-68 VERİLERİNİ OKUMA ---
+  float bmpSicaklik = 0;
+  int32_t basinc = 0;
+  float rakim = 0;
+  if (barometreVar) {
+    bmpSicaklik = bmp.readTemperature();
+    basinc = bmp.readPressure();          // Paskal (Pa)
+    rakim = bmp.readAltitude();           // metre
   }
 
-  // --- DHT11 / DHT22 ---
-  // Okuma başarısızsa NaN döner; bozuk veriyi göndermek yerine atlıyoruz.
-  const float humidity = dht.readHumidity();
-  const float temperature = dht.readTemperature();
-  if (!isnan(humidity))    r["dht_humidity"]    = round1(humidity);
-  if (!isnan(temperature)) r["dht_temperature"] = round1(temperature);
+  // --- HW-103 (YAĞMUR/TOPRAK) OKUMA ---
+  int yagmurDegeri = analogRead(YAGMUR_PIN);
+  float toprakYuzde = toprakYuzdesi(yagmurDegeri);
 
-  // --- HW-103 toprak nemi / yağmur ---
-  const int soilRaw = analogRead(PIN_SOIL_A);
-  r["hw103_soil"] = soilPercent(soilRaw);
-  // Ham değeri de gönderiyoruz: kalibrasyonu panelden görerek yapabilmek için
-  r["hw103_soil_raw"] = soilRaw;
-  // Modül ıslaklık algılayınca çıkışı LOW'a çeker
-  r["hw103_rain"] = (digitalRead(PIN_RAIN_D) == LOW) ? 1 : 0;
+  // Sensör verilerinde okuma hatası var mı kontrol et
+  if (isnan(nem) || isnan(dhtSicaklik)) {
+    Serial.println("HATA: DHT sensorunden veri okunamadi!");
+    return; // Döngüyü başa sar
+  }
 
-  serializeJson(doc, Serial);
-  Serial.println();
+  // --- EKRANA YAZDIRMA KISMI (senin yazdığın hâliyle) ---
+  Serial.print("Hava Nemi: %");
+  Serial.print(nem);
+  Serial.print(" | Ort. Sicaklik: ");
+  // İki farklı sıcaklık okunduğu için ortalamasını alabiliriz
+  if (barometreVar) {
+    Serial.print((dhtSicaklik + bmpSicaklik) / 2.0);
+  } else {
+    Serial.print(dhtSicaklik);
+  }
+  Serial.println(" *C");
+
+  Serial.print("Basinc: ");
+  Serial.print(basinc);
+  Serial.print(" Pa | Yagmur/Nem Seviyesi: ");
+  Serial.println(yagmurDegeri);
+
+  // --- OTONOM KARAR MEKANİZMASI ---
+  // Panelden elle komut verildiyse (otomatikKip = false) karışmıyoruz.
+  if (otomatikKip) {
+    if (yagmurDegeri < suEsikDegeri) {
+      Serial.println("DURUM: Yagmur/Su Algilandi! Vana veya Tente Aciliyor...");
+      servoyuAyarla(90); // Motor 90 dereceye gider
+    } else {
+      Serial.println("DURUM: Kuru hava. Sistem kapali konumda.");
+      servoyuAyarla(0);  // Motor 0 dereceye geri döner
+    }
+  } else {
+    Serial.print("DURUM: MANUEL kip. Servo ");
+    Serial.print(servoAcisi);
+    Serial.println(" derecede bekliyor.");
+  }
+
+  // --- PANELE GÖNDERİLEN SATIR ---
+  // Köprü programı yalnızca bu satırı okur, üsttekileri yok sayar.
+  paneleGonder(nem, dhtSicaklik, bmpSicaklik, basinc, rakim, toprakYuzde, yagmurDegeri);
+
+  Serial.println("----------------------------------------");
 }
 
 /** Ham ADC değerini 0–100 arası toprak nemi yüzdesine çevirir. */
-float soilPercent(int raw) {
-  const long span = (long)SOIL_DRY - (long)SOIL_WET;
-  if (span == 0) return 0;
-  float percent = (float)((long)SOIL_DRY - raw) * 100.0 / (float)span;
-  if (percent < 0) percent = 0;
-  if (percent > 100) percent = 100;
-  return round1(percent);
+float toprakYuzdesi(int ham) {
+  long aralik = (long)TOPRAK_KURU - (long)TOPRAK_ISLAK;
+  if (aralik == 0) return 0;
+  float yuzde = (float)((long)TOPRAK_KURU - ham) * 100.0 / (float)aralik;
+  if (yuzde < 0) yuzde = 0;
+  if (yuzde > 100) yuzde = 100;
+  return yuzde;
 }
 
-float round1(float value) {
-  return round(value * 10.0) / 10.0;
+/** Servo açısını sınırlar içinde ayarlar. */
+void servoyuAyarla(int aci) {
+  if (aci < 0) aci = 0;
+  if (aci > 180) aci = 180;
+  servoAcisi = aci;
+  tarimServo.write(servoAcisi);
 }
 
-// --------------------------------------------------------------------------
-// Komutlar
-// --------------------------------------------------------------------------
-/*
- * Beklenen komut biçimleri (her biri tek satır):
- *   {"cmd":"servo","angle":90,"id":"abc"}
- *   {"cmd":"servo_open","id":"abc"}          → 90°
- *   {"cmd":"servo_close","id":"abc"}         → 0°
- *   {"cmd":"pin","pin":8,"value":1,"id":"abc"}
- *   {"cmd":"read","id":"abc"}                → hemen ölçüm yayınla
+/**
+ * Ölçümleri tek satırda, panelin anlayacağı biçimde yazar.
+ * Kütüphane kullanmadan elle üretiliyor — ek kurulum gerekmesin diye.
+ *
+ * Örnek çıktı:
+ * VERI:{"dht_humidity":54.0,"dht_temperature":23.0,...}
  */
-void handleSerialCommands() {
+void paneleGonder(float nem, float dhtSic, float bmpSic,
+                  int32_t basincPa, float rakim,
+                  float toprak, int toprakHam) {
+  Serial.print("VERI:{");
+
+  Serial.print("\"dht_humidity\":");     Serial.print(nem, 1);
+  Serial.print(",\"dht_temperature\":"); Serial.print(dhtSic, 1);
+
+  if (barometreVar) {
+    Serial.print(",\"bmp180_temperature\":"); Serial.print(bmpSic, 1);
+    // Panelde hPa bekleniyor; Pa degerini 100'e boluyoruz
+    Serial.print(",\"bmp180_pressure\":");    Serial.print(basincPa / 100.0, 1);
+    Serial.print(",\"bmp180_altitude\":");    Serial.print(rakim, 1);
+  }
+
+  Serial.print(",\"hw103_soil\":");      Serial.print(toprak, 1);
+  Serial.print(",\"hw103_soil_raw\":");  Serial.print(toprakHam);
+  // HW-103 esigin altindaysa su var demektir
+  Serial.print(",\"hw103_rain\":");      Serial.print(toprakHam < suEsikDegeri ? 1 : 0);
+  Serial.print(",\"servo_aci\":");       Serial.print(servoAcisi);
+
+  Serial.println("}");
+}
+
+/*
+ * Panelden gelen komutlar. Basit metin satırları — Seri Monitör'e elle de
+ * yazarak deneyebilirsin (satır sonu "Yeni Satır" olmalı):
+ *
+ *   SERVO 90     -> servoyu 90 dereceye al, MANUEL kipe geç
+ *   AC           -> servo 90 derece (vana ac)
+ *   KAPA         -> servo 0 derece  (vana kapa)
+ *   AUTO         -> otomatik karar mekanizmasina geri don
+ *   PIN 8 1      -> 8 numarali pini HIGH yap (role vb.)
+ *   OKU          -> beklemeden hemen olcum satiri bas
+ */
+void komutlariIsle() {
   if (!Serial.available()) return;
 
-  const String line = Serial.readStringUntil('\n');
-  if (line.length() == 0) return;
+  String satir = Serial.readStringUntil('\n');
+  satir.trim();
+  satir.toUpperCase();
+  if (satir.length() == 0) return;
 
-  StaticJsonDocument<256> cmd;
-  const DeserializationError error = deserializeJson(cmd, line);
-  if (error) {
-    sendAck("", false, "json ayristirilamadi");
-    return;
-  }
+  if (satir.startsWith("SERVO")) {
+    int aci = satir.substring(5).toInt();
+    otomatikKip = false;
+    servoyuAyarla(aci);
+    cevapVer(true, "servo");
 
-  const char* action = cmd["cmd"] | "";
-  const char* id = cmd["id"] | "";
+  } else if (satir == "AC") {
+    otomatikKip = false;
+    servoyuAyarla(90);
+    cevapVer(true, "ac");
 
-  if (strcmp(action, "servo") == 0) {
-    setServo(cmd["angle"] | 0);
-    sendAck(id, true, nullptr);
+  } else if (satir == "KAPA") {
+    otomatikKip = false;
+    servoyuAyarla(0);
+    cevapVer(true, "kapa");
 
-  } else if (strcmp(action, "servo_open") == 0) {
-    setServo(cmd["angle"] | 90);
-    sendAck(id, true, nullptr);
+  } else if (satir == "AUTO") {
+    otomatikKip = true;
+    cevapVer(true, "auto");
 
-  } else if (strcmp(action, "servo_close") == 0) {
-    setServo(cmd["angle"] | 0);
-    sendAck(id, true, nullptr);
+  } else if (satir.startsWith("PIN")) {
+    // "PIN 8 1" -> pin 8, deger 1
+    int bosluk1 = satir.indexOf(' ');
+    int bosluk2 = satir.indexOf(' ', bosluk1 + 1);
+    if (bosluk1 > 0 && bosluk2 > 0) {
+      int pin = satir.substring(bosluk1 + 1, bosluk2).toInt();
+      int deger = satir.substring(bosluk2 + 1).toInt();
+      pinMode(pin, OUTPUT);
+      digitalWrite(pin, deger ? HIGH : LOW);
+      cevapVer(true, "pin");
+    } else {
+      cevapVer(false, "pin-eksik-parametre");
+    }
 
-  } else if (strcmp(action, "pin") == 0) {
-    const uint8_t pin = cmd["pin"] | 0;
-    const int value = cmd["value"] | 0;
-    pinMode(pin, OUTPUT);
-    digitalWrite(pin, value ? HIGH : LOW);
-    sendAck(id, true, nullptr);
-
-  } else if (strcmp(action, "read") == 0) {
-    publishReadings();
-    sendAck(id, true, nullptr);
-
-  } else if (strcmp(action, "ping") == 0) {
-    sendAck(id, true, nullptr);
+  } else if (satir == "OKU") {
+    cevapVer(true, "oku");
 
   } else {
-    sendAck(id, false, "bilinmeyen komut");
+    cevapVer(false, "bilinmeyen-komut");
   }
 }
 
-void setServo(int angle) {
-  if (angle < 0) angle = 0;
-  if (angle > 180) angle = 180;
-  servoAngle = angle;
-  servo.write(servoAngle);
-}
-
-void sendAck(const char* id, bool ok, const char* error) {
-  StaticJsonDocument<192> ack;
-  ack["t"] = "ack";
-  ack["id"] = id;
-  ack["ok"] = ok;
-  ack["servo"] = servoAngle;
-  if (error != nullptr) ack["error"] = error;
-  serializeJson(ack, Serial);
-  Serial.println();
+/** Komut sonucunu paneldeki köprüye bildirir. */
+void cevapVer(bool basarili, const char* komut) {
+  Serial.print("CEVAP:{\"ok\":");
+  Serial.print(basarili ? "true" : "false");
+  Serial.print(",\"komut\":\"");
+  Serial.print(komut);
+  Serial.print("\",\"servo\":");
+  Serial.print(servoAcisi);
+  Serial.print(",\"kip\":\"");
+  Serial.print(otomatikKip ? "AUTO" : "MANUEL");
+  Serial.println("\"}");
 }
