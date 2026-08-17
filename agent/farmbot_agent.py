@@ -39,7 +39,13 @@ except ImportError as exc:  # pragma: no cover - kurulum yardımı
     print("Kurulum:  pip install pyserial httpx websockets", file=sys.stderr)
     raise SystemExit(1)
 
+from gantry import GantryClient, to_status_tree  # noqa: E402  (yerel modül)
+
 logger = logging.getLogger("farmbot-agent")
+
+# Gantry konumunu yoklama sıklığı. Saniyede iki kez panel için akıcı,
+# PLC için de yük oluşturmayan bir denge.
+GANTRY_POLL_SECONDS = 0.5
 
 # Gönderilemeyen ölçümler için üst sınır. ~5 sn'de bir 7 kanal ≈ 5000 kayıt/saat;
 # 5000'lik tampon yaklaşık bir saatlik kopmayı karşılar.
@@ -154,14 +160,24 @@ class CloudClient:
 
 
 class Agent:
-    def __init__(self, serial_link: SerialLink, cloud: CloudClient) -> None:
+    def __init__(
+        self,
+        serial_link: SerialLink,
+        cloud: CloudClient,
+        gantry: GantryClient | None = None,
+    ) -> None:
         self.serial = serial_link
         self.cloud = cloud
+        # Hareket kontrolü isteğe bağlı: Gantry Studio kurulu değilse ajan
+        # yalnızca sensör köprüsü olarak çalışmaya devam eder
+        self.gantry = gantry
         self.buffer: deque[dict[str, Any]] = deque(maxlen=MAX_BUFFER)
         self.dropped = 0
         self.sent = 0
         # Seri porta gönderilen komutların yanıtını bekleyenler
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        # Buluta açık WebSocket; konum yayını da bunu kullanır
+        self._socket: Any | None = None
 
     # ------------------------------------------------------------------ #
     # Arduino → tampon
@@ -274,6 +290,7 @@ class Agent:
                 ) as socket:
                     logger.info("Komut kanalı açıldı")
                     delay = 2.0
+                    self._socket = socket
                     async for raw in socket:
                         await self._handle_cloud_message(socket, raw)
             except asyncio.CancelledError:
@@ -282,6 +299,63 @@ class Agent:
                 logger.warning("Komut kanalı koptu (%s), %.0f sn sonra yeniden", exc, delay)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30.0)
+            finally:
+                self._socket = None
+
+    async def _send_cloud(self, message: dict[str, Any]) -> bool:
+        """Buluta mesaj yollar. Bağlantı yoksa sessizce atlar."""
+        socket = self._socket
+        if socket is None:
+            return False
+        try:
+            await socket.send(json.dumps(message))
+            return True
+        except Exception:
+            return False
+
+    # ------------------------------------------------------------------ #
+    # Gantry (PLC hareket kontrolü) → bulut
+    # ------------------------------------------------------------------ #
+
+    async def gantry_loop_forever(self) -> None:
+        """Gantry Studio'dan konumu okuyup panele yayınlar.
+
+        Yayın hızı bilinçli olarak sınırlı: panel akıcı görünsün diye saniyede
+        iki kez okuyoruz ama **değişmeyen** durumu tekrar tekrar göndermiyoruz.
+        Robot dururken ağ trafiği neredeyse sıfıra iniyor.
+        """
+        if self.gantry is None:
+            return
+
+        last_signature: str | None = None
+        last_sent = 0.0
+
+        while True:
+            await asyncio.sleep(GANTRY_POLL_SECONDS)
+
+            status = await self.gantry.status()
+            if status is None:
+                continue
+
+            tree = to_status_tree(status)
+            position = tree["location_data"]["position"]
+            # Konumu 0.1 mm çözünürlükte imzala: gürültüden dolayı sürekli
+            # mesaj gitmesin
+            signature = "{:.1f}|{:.1f}|{:.1f}|{}|{}".format(
+                position["x"], position["y"], position["z"],
+                tree["informational_settings"]["locked"],
+                tree["informational_settings"]["busy"],
+            )
+
+            now = asyncio.get_running_loop().time()
+            # Değişmese bile 10 saniyede bir yolla: panel yeni açıldıysa
+            # ilk durumu beklemeden görsün
+            if signature == last_signature and (now - last_sent) < 10.0:
+                continue
+
+            if await self._send_cloud({"type": "status", "payload": tree}):
+                last_signature = signature
+                last_sent = now
 
     async def _handle_cloud_message(self, socket: Any, raw: str | bytes) -> None:
         try:
@@ -314,13 +388,22 @@ class Agent:
         )
 
     async def _apply_step(self, step: dict[str, Any]) -> None:
-        """CeleryScript adımını Arduino'nun metin komutuna çevirir.
+        """CeleryScript adımını donanım komutuna çevirir.
 
-        Arduino hareket edemez (gantry yok); yalnızca pin ve servo komutları
-        anlamlıdır. Diğerleri sessizce yok sayılır ki dizi çalıştırmak hata vermesin.
+        İki hedef var:
+          * hareket (X/Y/Z, ev, acil durdurma) → Gantry Studio → PLC
+          * pin ve servo                        → Arduino
         """
         kind = step.get("kind")
         args = step.get("args") or {}
+
+        # --- Hareket: Gantry Studio üzerinden PLC ---
+        if kind in {
+            "move_absolute", "move_relative", "home", "find_home",
+            "emergency_lock", "emergency_unlock",
+        }:
+            await self._apply_motion(kind, args)
+            return
 
         if kind == "write_pin":
             pin = int(args.get("pin_number", 0))
@@ -336,7 +419,54 @@ class Agent:
             await self._send_arduino("OKU")
 
         else:
-            logger.debug("Arduino düğümünde geçersiz adım yok sayıldı: %s", kind)
+            logger.debug("Bu düğümde geçersiz adım yok sayıldı: %s", kind)
+
+    async def _apply_motion(self, kind: str, args: dict[str, Any]) -> None:
+        """Hareket komutlarını Gantry Studio'ya iletir."""
+        if self.gantry is None:
+            raise RuntimeError(
+                "Hareket kontrolü yapılandırılmamış. Ajanı --gantry adresiyle başlatın."
+            )
+
+        # Acil durdurma her koşulda geçer — kilit kontrolünden önce gelir
+        if kind == "emergency_lock":
+            logger.warning("ACİL DURDURMA — tüm eksenler durduruluyor")
+            await self.gantry.emergency_stop()
+            return
+
+        if kind == "emergency_unlock":
+            logger.info("Acil kilit açılıyor, sürücüler etkinleştiriliyor")
+            await self.gantry.set_enabled(True)
+            return
+
+        speed = float(args.get("speed", 20) or 20)
+
+        if kind == "move_absolute":
+            location = (args.get("location") or {}).get("args") or {}
+            offset = (args.get("offset") or {}).get("args") or {}
+            x = float(location.get("x", 0)) + float(offset.get("x", 0) or 0)
+            y = float(location.get("y", 0)) + float(offset.get("y", 0) or 0)
+            z = float(location.get("z", 0)) + float(offset.get("z", 0) or 0)
+            logger.info("Hedefe gidiliyor: X %.1f · Y %.1f · Z %.1f", x, y, z)
+            await self.gantry.move_xyz(x, y, z, speed)
+
+        elif kind == "move_relative":
+            # Göreli adım için önce bulunduğu yeri öğrenmeliyiz
+            current = await self.gantry.position()
+            if current is None:
+                raise RuntimeError("Mevcut konum okunamadı; göreli hareket yapılamıyor")
+            x = current[0] + float(args.get("x", 0) or 0)
+            y = current[1] + float(args.get("y", 0) or 0)
+            z = current[2] + float(args.get("z", 0) or 0)
+            logger.info("Göreli hareket → X %.1f · Y %.1f · Z %.1f", x, y, z)
+            await self.gantry.move_xyz(x, y, z, speed)
+
+        elif kind in {"home", "find_home"}:
+            axis = str(args.get("axis", "all")).lower()
+            if axis not in {"x", "y", "z", "all"}:
+                axis = "all"
+            logger.info("Eve dönülüyor: %s", axis)
+            await self.gantry.go_home(axis)
 
     async def _send_arduino(self, command: str, timeout: float = 5.0) -> dict[str, Any]:
         """Komutu gönderir ve Arduino'nun onayını bekler."""
@@ -364,6 +494,8 @@ class Agent:
             asyncio.create_task(self.flush_forever(), name="flush"),
             asyncio.create_task(self.command_loop_forever(), name="commands"),
         ]
+        if self.gantry is not None:
+            tasks.append(asyncio.create_task(self.gantry_loop_forever(), name="gantry"))
         try:
             # Görevlerden biri beklenmedik şekilde biterse hepsini kapat
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -376,6 +508,8 @@ class Agent:
             await asyncio.gather(*tasks, return_exceptions=True)
             await self.serial.close()
             await self.cloud.close()
+            if self.gantry is not None:
+                await self.gantry.close()
 
 
 # --------------------------------------------------------------------------- #
@@ -403,6 +537,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--token", default=os.getenv("FARMBOT_DEVICE_TOKEN"),
         help="Cihaz token'ı (panelde Ayarlar → Köprü Ajanı bölümünden üretilir)",
     )
+    parser.add_argument(
+        "--gantry",
+        default=os.getenv("FARMBOT_GANTRY_URL", "http://localhost:8091"),
+        help=(
+            "Gantry Studio adresi (PLC hareket kontrolü). "
+            "Hareket kontrolü istemiyorsanız --no-gantry kullanın."
+        ),
+    )
+    parser.add_argument(
+        "--no-gantry",
+        action="store_true",
+        help="Hareket kontrolünü devre dışı bırak; yalnızca sensör köprüsü çalışsın",
+    )
     parser.add_argument("--verbose", action="store_true", help="Ayrıntılı günlük")
     return parser
 
@@ -415,8 +562,24 @@ async def main_async(args: argparse.Namespace) -> int:
         )
         return 1
 
-    logger.info("Ajan başlıyor · port=%s · api=%s", args.port, args.api)
-    agent = Agent(SerialLink(args.port, args.baud), CloudClient(args.api, args.token))
+    gantry: GantryClient | None = None
+    if not args.no_gantry:
+        gantry = GantryClient(args.gantry)
+        # Açılışta bir kez yokla: kullanıcı hareket kontrolünün durumunu hemen görsün
+        if await gantry.status() is None:
+            logger.warning(
+                "Gantry Studio (%s) şu an yanıt vermiyor. Sensörler çalışmaya devam eder; "
+                "hareket kontrolü servis ayağa kalkınca kendiliğinden devreye girer.",
+                args.gantry,
+            )
+        else:
+            logger.info("Hareket kontrolü bağlandı: %s", args.gantry)
+
+    logger.info(
+        "Ajan başlıyor · seri=%s · api=%s · hareket=%s",
+        args.port, args.api, "kapalı" if gantry is None else args.gantry,
+    )
+    agent = Agent(SerialLink(args.port, args.baud), CloudClient(args.api, args.token), gantry)
 
     try:
         await agent.run()

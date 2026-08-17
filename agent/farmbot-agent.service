@@ -1,4 +1,4 @@
-[Unit]
+﻿[Unit]
 Description=FarmBot köprü ajanı (Arduino -> bulut)
 # Ağ hazır olmadan başlarsa ilk gönderimler tampona düşer; beklemek daha temiz
 After=network-online.target
@@ -12,6 +12,7 @@ User=pi
 WorkingDirectory=/home/pi/-farmbot-web/agent
 Environment=FARMBOT_SERIAL_PORT=/dev/ttyUSB0
 Environment=FARMBOT_BAUD=9600
+Environment=FARMBOT_GANTRY_URL=http://localhost:8091
 Environment=FARMBOT_API_URL=https://farmbot-api.onrender.com
 Environment=FARMBOT_DEVICE_TOKEN=fbt_BURAYA_TOKEN_YAPISTIRIN
 # ------------------
