@@ -20,7 +20,8 @@ Arduino ──USB seri──> Raspberry Pi (ajan) ──HTTPS/WSS──> farmbot
    - `ArduinoJson` (7.x)
 2. [`firmware/arduino/farmbot_sensors/farmbot_sensors.ino`](../firmware/arduino/farmbot_sensors/farmbot_sensors.ino)
    dosyasını açın.
-3. **DHT11** kullanıyorsanız `#define DHT_TYPE DHT22` satırını `DHT11` yapın.
+3. Sketch **DHT11** için ayarlıdır. DHT22'ye geçerseniz `#define DHT_TYPE DHT11`
+   satırını `DHT22` yapmanız yeterli.
 4. Karta yükleyin. Seri Monitör'ü **115200** baud ile açtığınızda saniyeler
    içinde şuna benzer satırlar görmelisiniz:
 
@@ -34,7 +35,7 @@ Arduino ──USB seri──> Raspberry Pi (ajan) ──HTTPS/WSS──> farmbot
 | Bileşen | Bağlantı |
 |---|---|
 | BMP180 / GY-68 | `VCC→3.3V` · `GND→GND` · `SDA→A4` · `SCL→A5` |
-| DHT11 / DHT22 | `VCC→5V` · `GND→GND` · `DATA→D2` (DATA–VCC arasına 10 kΩ) |
+| DHT11 | `VCC→5V` · `GND→GND` · `DATA→D2` (DATA–VCC arasına 10 kΩ; 3 bacaklı hazır modülde direnç kart üzerindedir) |
 | HW-103 | `VCC→5V` · `GND→GND` · `AO→A0` · `DO→D3` |
 | SG-5010 servo | Turuncu→`D6` · Kırmızı→**ayrı 5–6 V güç** · Kahve→ortak `GND` |
 

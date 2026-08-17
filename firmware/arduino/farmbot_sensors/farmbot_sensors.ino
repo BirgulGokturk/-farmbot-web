@@ -21,8 +21,10 @@
  * BAĞLANTI ŞEMASI (Arduino Uno)
  *
  *   BMP180 / GY-68        →  VCC:3.3V   GND:GND   SDA:A4   SCL:A5
- *   DHT11 / DHT22         →  VCC:5V     GND:GND   DATA:D2
- *                            (DATA ile VCC arasına 10 kΩ pull-up direnç)
+ *   DHT11                 →  VCC:5V     GND:GND   DATA:D2
+ *                            (DATA ile VCC arasına 10 kΩ pull-up direnç.
+ *                             3 bacaklı hazır modül kullanıyorsanız direnç
+ *                             kartın üzerindedir, ayrıca eklemeyin.)
  *   HW-103                →  VCC:5V     GND:GND   AO:A0    DO:D3
  *   SG-5010 servo         →  Kırmızı:5V* Kahve:GND Turuncu:D6
  *
@@ -47,8 +49,13 @@ const uint8_t PIN_SERVO      = 6;   // SG-5010 sinyal
 const uint8_t PIN_PUMP       = 8;   // Su pompası rölesi (isteğe bağlı)
 const uint8_t PIN_SOIL_A     = A0;  // HW-103 analog çıkış
 
-// DHT11 kullanıyorsanız DHT22'yi DHT11 ile değiştirin
-#define DHT_TYPE DHT22
+// Kullanılan sensör: DHT11
+// (DHT22'ye geçerseniz burayı DHT22 yapmanız yeterli — başka değişiklik gerekmez)
+//
+// DHT11'in sınırları: sıcaklık 0–50 °C (±2 °C), nem %20–90 (±%5).
+// Bu yüzden negatif sıcaklık ve çok kuru/çok nemli ortam ölçemez;
+// donma noktası civarında değer beklemeyin.
+#define DHT_TYPE DHT11
 
 // --------------------------------------------------------------------------
 // Kalibrasyon
@@ -99,7 +106,7 @@ void setup() {
   hello["t"] = "hello";
   hello["fw"] = "farmbot-node-1.0";
   hello["bmp180"] = bmpReady;
-  hello["dht"] = (DHT_TYPE == DHT22) ? "DHT22" : "DHT11";
+  hello["dht"] = (DHT_TYPE == DHT11) ? "DHT11" : "DHT22";
   serializeJson(hello, Serial);
   Serial.println();
 }
