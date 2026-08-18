@@ -33,18 +33,14 @@ AXES = ("x", "y", "z")
 # Kalibre edilmemiş bir makinede davranış bugünküyle birebir aynı kalsın diye
 # nötr seçildi; kullanıcı ölçüm yapana kadar hiçbir şey sessizce değişmez.
 AXIS_DEFAULTS: dict[str, Any] = {
-    "scale": 1.0,      # komut edilen mm başına makineye yazılan birim
-    "offset": 0.0,     # sıfır noktası kaydırması (makine birimi)
-    "invert": False,   # yön ters mi
-    # Yumuşak sınırlar **boş** başlar (None = sınır yok).
-    #
-    # Buraya bir sayı koymak cazip ama tehlikeli: kullanıcı kalibrasyon
-    # sayfasını hiç açmamışken varsayılan bir limit, 4500 mm'lik bir yatakta
-    # her hareketi reddeder. Kural: varsayılan davranış, bu özellik hiç
-    # yokmuş gibi olmalı. Sınırı ancak kullanıcı yazarsa uyguluyoruz.
-    "min_mm": None,
+    # Makinenin kendi terimleri. Gantry Studio'nun `gantry_calib.json` dosyası
+    # ve PLC_BRIEF.md §5 ile aynı alan adları — iki taraf aynı dili konuşsun.
+    "cpm": None,       # counts/mm; None = makineninkini kullan
+    "dir": 1,          # +1 ya da -1
+    "home_mm": None,   # sıfır noktasının mm karşılığı
+    "min_mm": None,    # yumuşak sınırlar; None = makineninki geçerli
     "max_mm": None,
-    "speed": 20.0,     # eksene özel hız
+    "speed": 20.0,     # eksene özel hız tavanı
     "accel": 100.0,    # eksene özel ivme
 }
 
@@ -70,18 +66,18 @@ VIEWER_DEFAULTS: dict[str, Any] = {
 # negatif olabilir (yön çevirmenin bir başka yolu) ama sıfıra çok yakın ya da
 # absürt büyük olamaz. `offset`, `min_mm`, `max_mm` işaretli aralıkla sınırlı.
 _AXIS_MAGNITUDE_BOUNDS: dict[str, tuple[float, float]] = {
-    "scale": (1e-4, 1e4),
+    "cpm": (1e-4, 1e5),
     "speed": (0.1, 1000.0),
     "accel": (0.1, 100000.0),
 }
 _AXIS_RANGE_BOUNDS: dict[str, tuple[float, float]] = {
-    "offset": (-1e6, 1e6),
+    "home_mm": (-1e6, 1e6),
     "min_mm": (-1e6, 1e6),
     "max_mm": (-1e6, 1e6),
 }
 
 # Boş bırakılabilen alanlar: değer yoksa o sınır uygulanmıyor
-_OPTIONAL_AXIS_KEYS = ("min_mm", "max_mm")
+_OPTIONAL_AXIS_KEYS = ("cpm", "home_mm", "min_mm", "max_mm")
 
 
 def _number(
@@ -116,9 +112,10 @@ def normalize_axis(raw: Any) -> dict[str, Any]:
             span=_AXIS_RANGE_BOUNDS.get(key),
         )
         for key, default in AXIS_DEFAULTS.items()
-        if key != "invert" and key not in _OPTIONAL_AXIS_KEYS
+        if key != "dir" and key not in _OPTIONAL_AXIS_KEYS
     }
-    axis["invert"] = bool(source.get("invert", AXIS_DEFAULTS["invert"]))
+    # Yön yalnızca +1 ya da -1 olabilir; arada bir değer motoru şaşırtır
+    axis["dir"] = -1 if _number(source.get("dir", 1), 1.0) < 0 else 1
 
     # Boş/geçersiz sınır = sınır yok. Boş bir metin kutusunu 0'a çevirseydik
     # kullanıcı farkında olmadan ekseni kilitlerdi.
@@ -127,12 +124,13 @@ def normalize_axis(raw: Any) -> dict[str, Any]:
         if value is None or value == "":
             axis[key] = None
         else:
-            parsed = _number(value, float("nan"), span=_AXIS_RANGE_BOUNDS[key])
+            parsed = _number(
+                value,
+                float("nan"),
+                magnitude=_AXIS_MAGNITUDE_BOUNDS.get(key),
+                span=_AXIS_RANGE_BOUNDS.get(key),
+            )
             axis[key] = None if parsed != parsed else parsed
-
-    # Ölçek sıfır olursa bölme hatası verir ve eksen tamamen kilitlenir
-    if axis["scale"] == 0:
-        axis["scale"] = float(AXIS_DEFAULTS["scale"])
 
     # İkisi de verilmiş ama ters girilmişse düzelt; aksi hâlde her hareket reddedilir
     if (

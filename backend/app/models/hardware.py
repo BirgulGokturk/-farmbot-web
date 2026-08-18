@@ -14,6 +14,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     Enum as SAEnum,
     Float,
@@ -83,6 +84,16 @@ class Sensor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Grafik ekseni ve ısı haritası renk ölçeği bu aralığa göre çizilir
     min_value: Mapped[float] = mapped_column(Float, default=0.0)
     max_value: Mapped[float] = mapped_column(Float, default=100.0)
+
+    # Sensör fiziksel olarak takılı mı?
+    #
+    # Arduino, bir analog pini sensör bağlı olmasa da okuyor: boşta kalan pin
+    # gürültü üretiyor ve panele düzgün görünen ama anlamsız bir eğri olarak
+    # geliyor. Kanalı silmek çözüm değil — sensör takıldığında yeniden
+    # oluşturulması gerekir ve geçmiş veri kopar. Bunun yerine işaretliyoruz:
+    # takılı olmayan sensörün ölçümleri kaydedilmeye devam eder ama grafiklerde,
+    # ısı haritasında ve kartlarda gösterilmez.
+    installed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
 class SensorReading(TimestampMixin, Base):

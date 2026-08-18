@@ -374,6 +374,11 @@ export const api = {
       request<{ detail: string }>(`/devices/${deviceId}/peripherals/${id}`, { method: "DELETE" }),
 
     sensors: (deviceId: string) => request<Sensor[]>(`/devices/${deviceId}/sensors`),
+    updateSensor: (deviceId: string, sensorId: string, input: Partial<Sensor>) =>
+      request<Sensor>(`/devices/${deviceId}/sensors/${sensorId}`, {
+        method: "PATCH",
+        body: input,
+      }),
     createSensor: (deviceId: string, input: { label: string; pin: number; unit?: string }) =>
       request<Sensor>(`/devices/${deviceId}/sensors`, { method: "POST", body: input }),
     series: (deviceId: string, sensorId: string, hours = 24) =>

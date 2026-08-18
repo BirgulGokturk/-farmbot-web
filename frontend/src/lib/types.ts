@@ -244,6 +244,8 @@ export interface Sensor {
   icon: string;
   min_value: number;
   max_value: number;
+  /** Sensör fiziksel olarak takılı mı? Takılı değilse grafiklerde gösterilmez. */
+  installed: boolean;
 }
 
 /** Çevre biriminin sürülme biçimi. */

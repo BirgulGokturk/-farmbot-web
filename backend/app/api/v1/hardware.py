@@ -12,6 +12,7 @@ from app.api.deps import DbSession, OwnedDevice
 from app.models import Peripheral, Sensor, SensorReading
 from app.schemas.common import Message
 from app.schemas.hardware import (
+    SensorUpdate,
     PeripheralCreate,
     PeripheralRead,
     SensorCreate,
@@ -89,6 +90,23 @@ async def create_sensor(
     return sensor
 
 
+@router.patch("/sensors/{sensor_id}", response_model=SensorRead)
+async def update_sensor(
+    sensor_id: uuid.UUID, payload: SensorUpdate, device: OwnedDevice, db: DbSession
+) -> Sensor:
+    """Sensör ayarlarını günceller — özellikle 'takılı mı' anahtarı.
+
+    Takılı olmayan sensörü silmek yerine işaretliyoruz: silinseydi ölçüm
+    geldiğinde kanal otomatik yeniden oluşur ve aynı yere dönerdik.
+    """
+    sensor = await _get_sensor(db, device.id, sensor_id)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(sensor, field, value)
+    await db.commit()
+    await db.refresh(sensor)
+    return sensor
+
+
 @router.delete("/sensors/{sensor_id}", response_model=Message)
 async def delete_sensor(sensor_id: uuid.UUID, device: OwnedDevice, db: DbSession) -> Message:
     sensor = await _get_sensor(db, device.id, sensor_id)
@@ -142,6 +160,14 @@ async def create_reading(
         await evaluate_device_alerts(device.id)
 
     return reading
+
+
+async def _hidden_sensor_ids(db, device_id) -> list[uuid.UUID]:
+    """Takılı olmayan sensörler — grafiklerde ve haritada gösterilmez."""
+    result = await db.execute(
+        select(Sensor.id).where(Sensor.device_id == device_id, Sensor.installed.is_(False))
+    )
+    return [row[0] for row in result.all()]
 
 
 def _real_data_only(device) -> list:
@@ -216,6 +242,9 @@ async def spatial_readings(
         SensorReading.y.is_not(None),
         *_real_data_only(device),
     ]
+    hidden = await _hidden_sensor_ids(db, device.id)
+    if hidden:
+        conditions.append(SensorReading.sensor_id.not_in(hidden))
     if sensor_id is not None:
         conditions.append(SensorReading.sensor_id == sensor_id)
 
@@ -268,7 +297,9 @@ async def clear_readings(
 @router.get("/readings/latest", response_model=list[SensorReadingRead])
 async def latest_readings(device: OwnedDevice, db: DbSession) -> list[SensorReading]:
     """Her sensörün en son okuması — Kontrol Merkezi kartları için."""
-    sensors = await db.execute(select(Sensor.id).where(Sensor.device_id == device.id))
+    sensors = await db.execute(
+        select(Sensor.id).where(Sensor.device_id == device.id, Sensor.installed.is_(True))
+    )
     latest: list[SensorReading] = []
 
     for (sensor_id,) in sensors.all():

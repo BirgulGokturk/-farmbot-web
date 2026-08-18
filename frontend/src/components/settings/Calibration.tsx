@@ -1,55 +1,56 @@
 /**
- * Eksen kalibrasyonu — ölçek, ofset, yön, sınırlar, hız ve ivme.
+ * Ölçüler ve Kalibrasyon.
  *
- * Neden gerekli?
- *   Hareket komutu PLC'ye Gantry Studio üzerinden gidiyor ve orada `counts-per-mm`
- *   ayarlanmadığı sürece "100 mm git" sahada başka bir mesafeye dönüşüyor. Gantry
- *   Studio'ya dokunmadan, komutu göndermeden önce ajanda bir dönüşüm uyguluyoruz:
+ * Makinenin kendi kalibrasyon ekranıyla aynı düzen ve aynı alanlar: counts/mm,
+ * yön, home, min/max ve eksen başına ölçüm sihirbazı. Alanlar bilerek makinenin
+ * terimleriyle adlandırıldı — Gantry Studio'nun `gantry_calib.json` dosyası ve
+ * PLC_BRIEF.md §5 aynı isimleri kullanıyor, iki taraf aynı dili konuşsun.
  *
- *       makine = ofset + yön × ölçek × kullanıcı_mm
+ * Kalibrasyon neden önemli: Gantry Studio konumu PLC register'ından **ham count**
+ * olarak veriyor, milimetre değil. `counts/mm` doğru olmadan panelde görünen
+ * konum da, göreli hareketin hesapladığı hedef de yanlış çıkıyor.
  *
- *   Ölçeği tahmin etmek yerine sahada **ölçüyoruz**: sihirbaz ekseni bilinen bir
- *   mesafe kadar sürüyor, kullanıcı cetvelle gerçekte ne kadar gittiğini giriyor,
- *   ölçek buradan hesaplanıyor.
+ * Boş bırakılan her alan "makinenin kendi değerini kullan" demektir.
  */
 
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Compass, Gauge, Ruler, Save, Wand2 } from "lucide-react";
+import { Ruler, Save } from "lucide-react";
 
-import { Badge, Button, Card, CardHeader, Input, Toggle } from "@/components/ui/primitives";
+import { Badge, Button, Card, CardHeader, Input } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import {
   AXES,
+  cpmFromMeasurement,
+  mmFromRaw,
   readMachineConfig,
-  scaleFromMeasurement,
-  toMachine,
   type AxisConfig,
   type AxisName,
 } from "@/lib/machine";
+import { useBotPosition } from "@/store/useBot";
 import type { Device } from "@/lib/types";
 
 export function Calibration({ device }: { device: Device }) {
   const queryClient = useQueryClient();
   const stored = readMachineConfig(device.settings);
   const [axes, setAxes] = useState(stored.axes);
-  const [active, setActive] = useState<AxisName>("x");
+  const position = useBotPosition();
 
-  // Cihaz değişirse ya da sunucudan yeni değerler gelirse formu tazele
+  /** Ölçüm sihirbazının eksen başına işaretlediği başlangıç konumu (mm). */
+  const [marks, setMarks] = useState<Partial<Record<AxisName, number>>>({});
+  const [measured, setMeasured] = useState<Partial<Record<AxisName, string>>>({});
+
   useEffect(() => {
     setAxes(readMachineConfig(device.settings).axes);
   }, [device.id, device.settings]);
 
   const save = useMutation({
-    mutationFn: () =>
-      api.devices.update(device.id, {
-        settings: { ...device.settings, axes },
-      }),
+    mutationFn: () => api.devices.update(device.id, { settings: { ...device.settings, axes } }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["device", device.id] });
       void queryClient.invalidateQueries({ queryKey: ["devices"] });
-      toast.success("Kalibrasyon kaydedildi", "Bağlı ajana anında iletildi");
+      toast.success("Ölçüler kaydedildi", "Bağlı ajana anında iletildi");
     },
     onError: (error) => toast.error("Kaydedilemedi", (error as Error).message),
   });
@@ -58,257 +59,229 @@ export function Calibration({ device }: { device: Device }) {
     setAxes((previous) => ({ ...previous, [axis]: { ...previous[axis], ...changes } }));
   }
 
-  const config = axes[active];
+  function compute(axis: AxisName) {
+    const start = marks[axis];
+    const travelled = Number(measured[axis]);
+
+    if (start === undefined) {
+      toast.error("Önce başlangıcı işaretleyin", "Sonra ekseni sürüp ölçün");
+      return;
+    }
+    if (!Number.isFinite(travelled) || travelled === 0) {
+      toast.error("Ölçüm gerekli", "Cetvelle ölçtüğünüz mesafeyi mm olarak yazın");
+      return;
+    }
+
+    // İşaretlenen ve şimdiki konum, o an geçerli counts/mm ile mm'ye çevrilmiş
+    // hâlde geliyor. Makinenin gerçekte saydığı ham count'a geri dönüp
+    // kullanıcının ölçtüğü gerçek mesafeye bölüyoruz.
+    const config = axes[axis];
+    const countsMoved = Math.abs(position[axis] - start) * (config.cpm ?? 1);
+
+    const next = cpmFromMeasurement(countsMoved, travelled);
+    if (next === null) {
+      toast.error("Hesaplanamadı", "Eksen hareket etmemiş görünüyor");
+      return;
+    }
+
+    patch(axis, { cpm: Number(next.toFixed(4)) });
+    setMeasured((previous) => ({ ...previous, [axis]: "" }));
+    setMarks((previous) => ({ ...previous, [axis]: undefined }));
+    toast.success(
+      `${axis.toUpperCase()} için counts/mm = ${next.toFixed(4)}`,
+      "Kaydetmeyi unutmayın",
+    );
+  }
+
   const dirty = JSON.stringify(axes) !== JSON.stringify(stored.axes);
 
   return (
-    <Card>
+    <Card className="lg:col-span-2">
       <CardHeader
-        title="Kalibrasyon"
-        subtitle="Her eksen için ayrı ölçek, yön ve limit"
-        icon={<Compass className="size-4" />}
+        title="Ölçüler ve Kalibrasyon"
+        subtitle="Eksen başına counts/mm, yön ve çalışma aralığı"
+        icon={<Ruler className="size-4" />}
         action={dirty ? <Badge tone="warning">Kaydedilmedi</Badge> : undefined}
       />
 
-      {/* Eksen seçici */}
-      <div className="mb-4 grid grid-cols-3 gap-2">
+      <p className="mb-4 rounded-xl border border-line bg-surface-2 px-3.5 py-3 text-xs text-muted">
+        Her ekseni bir kez kalibre edin:{" "}
+        <strong className="text-content">Başlangıcı işaretle</strong>’ye basın, ekseni bilinen
+        bir mesafe kadar sürün, gerçek yolu cetvelle ölçüp{" "}
+        <strong className="text-content">ölçülen mm</strong> alanına yazın,{" "}
+        <strong className="text-content">Hesapla</strong>’ya basın. Bu, counts/mm değerini
+        ayarlar; konumlar ve sınırlar böylece gerçek milimetre olur.{" "}
+        <strong className="text-content">Max mm</strong> eksenin kullanılabilir strok
+        uzunluğudur. <strong className="text-content">Yön</strong> hareket yönünü çevirir.
+        Boş bırakılan alanlarda makinenin kendi değeri geçerli olur.
+      </p>
+
+      {/* Dar ekranda tablo kendi içinde yatayda kaysın; sayfa gövdesi kaymasın */}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[860px] border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-xs text-subtle">
+              <th className="px-2 py-2 font-medium">Eksen</th>
+              <th className="px-2 py-2 font-medium">counts/mm</th>
+              <th className="px-2 py-2 font-medium">Yön</th>
+              <th className="px-2 py-2 font-medium">Home mm</th>
+              <th className="px-2 py-2 font-medium">Min mm</th>
+              <th className="px-2 py-2 font-medium">Max mm</th>
+              <th className="px-2 py-2 font-medium">Anlık mm</th>
+              <th className="px-2 py-2 font-medium">Kalibrasyon</th>
+            </tr>
+          </thead>
+          <tbody>
+            {AXES.map((axis) => {
+              const config = axes[axis];
+              const marked = marks[axis];
+              return (
+                <tr key={axis} className="border-b border-line/60 last:border-0">
+                  <td className="px-2 py-2.5 font-semibold text-content">{axis.toUpperCase()}</td>
+
+                  <td className="px-2 py-2.5">
+                    <Cell
+                      name={`cpm-${axis}`}
+                      value={config.cpm}
+                      placeholder="makineden"
+                      onChange={(value) => patch(axis, { cpm: value })}
+                    />
+                  </td>
+
+                  <td className="px-2 py-2.5">
+                    <button
+                      onClick={() => patch(axis, { dir: config.dir === 1 ? -1 : 1 })}
+                      aria-label={`${axis.toUpperCase()} yönünü çevir`}
+                      className="h-9 w-12 rounded-lg border border-line bg-surface-2 text-base font-semibold text-content transition-soft hover:border-brand/40 hover:text-brand"
+                    >
+                      {config.dir === 1 ? "+" : "−"}
+                    </button>
+                  </td>
+
+                  <td className="px-2 py-2.5">
+                    <Cell
+                      name={`home-${axis}`}
+                      value={config.home_mm}
+                      onChange={(value) => patch(axis, { home_mm: value })}
+                    />
+                  </td>
+                  <td className="px-2 py-2.5">
+                    <Cell
+                      name={`min-${axis}`}
+                      value={config.min_mm}
+                      onChange={(value) => patch(axis, { min_mm: value })}
+                    />
+                  </td>
+                  <td className="px-2 py-2.5">
+                    <Cell
+                      name={`max-${axis}`}
+                      value={config.max_mm}
+                      onChange={(value) => patch(axis, { max_mm: value })}
+                    />
+                  </td>
+
+                  <td className="px-2 py-2.5 font-mono text-brand">
+                    {position[axis].toFixed(2)}
+                  </td>
+
+                  <td className="px-2 py-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setMarks((previous) => ({ ...previous, [axis]: position[axis] }));
+                          toast.info(
+                            "Başlangıç işaretlendi",
+                            "Şimdi ekseni sürün ve gerçek yolu ölçün",
+                          );
+                        }}
+                      >
+                        {marked === undefined ? "Başlangıcı işaretle" : "Yeniden işaretle"}
+                      </Button>
+                      <Input
+                        name={`meas-${axis}`}
+                        inputMode="decimal"
+                        placeholder="ölçülen mm"
+                        className="w-28"
+                        value={measured[axis] ?? ""}
+                        onChange={(e) =>
+                          setMeasured((previous) => ({ ...previous, [axis]: e.target.value }))
+                        }
+                      />
+                      <Button size="sm" variant="primary" onClick={() => compute(axis)}>
+                        Hesapla
+                      </Button>
+                    </div>
+                    {marked !== undefined && (
+                      <p className="mt-1 font-mono text-xs text-subtle">
+                        işaret {marked.toFixed(2)} → şimdi {position[axis].toFixed(2)} mm
+                      </p>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Kaydetmeden önce sonucu somut görmek, yanlış bir counts/mm değerini
+          fark etmeyi kolaylaştırıyor. */}
+      <div className="mt-4 grid gap-2 rounded-xl border border-line bg-surface-2 px-3.5 py-3 text-xs sm:grid-cols-3">
         {AXES.map((axis) => (
-          <button
-            key={axis}
-            onClick={() => setActive(axis)}
-            className={
-              active === axis
-                ? "h-10 rounded-xl border border-transparent bg-gradient-brand text-sm font-semibold text-white shadow-soft"
-                : "h-10 rounded-xl border border-line bg-surface-2 text-sm font-semibold text-muted transition-soft hover:text-content"
-            }
-          >
-            {axis.toUpperCase()}
-          </button>
+          <p key={axis} className="font-mono text-subtle">
+            {axis.toUpperCase()}: 1000 count → {mmFromRaw(axes[axis], 1000).toFixed(1)} mm
+          </p>
         ))}
       </div>
 
-      <div className="space-y-4">
-        <MeasureWizard
-          deviceId={device.id}
-          axis={active}
-          config={config}
-          onScale={(scale) => patch(active, { scale })}
-        />
-
-        <div className="grid grid-cols-2 gap-3">
-          <NumberField
-            name={`scale-${active}`}
-            label="Ölçek"
-            value={config.scale}
-            step="0.0001"
-            hint="1 mm komut = kaç makine birimi"
-            onChange={(value) => patch(active, { scale: value })}
-          />
-          <NumberField
-            name={`offset-${active}`}
-            label="Ofset"
-            value={config.offset}
-            hint={active === "x" ? "X sıfır noktası kaydırması" : "Sıfır noktası kaydırması"}
-            onChange={(value) => patch(active, { offset: value })}
-          />
-          <OptionalNumberField
-            name={`min-${active}`}
-            label="En küçük konum (mm)"
-            value={config.min_mm}
-            onChange={(value) => patch(active, { min_mm: value })}
-          />
-          <OptionalNumberField
-            name={`max-${active}`}
-            label="En büyük konum (mm)"
-            value={config.max_mm}
-            onChange={(value) => patch(active, { max_mm: value })}
-          />
-          <NumberField
-            name={`speed-${active}`}
-            label="Hız"
-            value={config.speed}
-            onChange={(value) => patch(active, { speed: value })}
-          />
-          <NumberField
-            name={`accel-${active}`}
-            label="İvme"
-            value={config.accel}
-            onChange={(value) => patch(active, { accel: value })}
-          />
-        </div>
-
-        <div className="flex items-center justify-between rounded-xl bg-surface-2 px-3.5 py-3">
-          <div>
-            <p className="text-sm font-medium text-content">Yönü ters çevir</p>
-            <p className="text-xs text-subtle">
-              Artı tuşu eksene ters yönde hareket ettiriyorsa açın
-            </p>
-          </div>
-          <Toggle
-            checked={config.invert}
-            onChange={(next) => patch(active, { invert: next })}
-            label="Yönü ters çevir"
-          />
-        </div>
-
-        {/* Ayarların ne anlama geldiğini somut göstermek, hatalı ölçeği
-            kaydetmeden fark etmeyi kolaylaştırıyor. */}
-        <div className="rounded-xl border border-line bg-surface-2 px-3.5 py-3 text-xs">
-          <p className="mb-1.5 font-medium text-content">Önizleme</p>
-          <ul className="space-y-1 font-mono text-subtle">
-            {[10, 100, config.max_mm ?? 1000].map((mm) => (
-              <li key={mm}>
-                {mm} mm → makineye {toMachine(config, mm).toFixed(2)}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <Button
-          variant="primary"
-          fullWidth
-          icon={<Save className="size-4" />}
-          loading={save.isPending}
-          disabled={!dirty}
-          onClick={() => save.mutate()}
-        >
-          Kalibrasyonu Kaydet
-        </Button>
-      </div>
+      <Button
+        variant="primary"
+        fullWidth
+        className="mt-4"
+        icon={<Save className="size-4" />}
+        loading={save.isPending}
+        disabled={!dirty}
+        onClick={() => save.mutate()}
+      >
+        Ölçüleri Kaydet
+      </Button>
     </Card>
   );
 }
 
-// --------------------------------------------------------------------------- //
-
 /**
- * Ölçüm sihirbazı: ekseni bilinen bir mesafe kadar sürer, kullanıcının
- * ölçtüğü gerçek mesafeden ölçeği hesaplar.
- */
-function MeasureWizard({
-  deviceId,
-  axis,
-  config,
-  onScale,
-}: {
-  deviceId: string;
-  axis: AxisName;
-  config: AxisConfig;
-  onScale: (scale: number) => void;
-}) {
-  const [commanded, setCommanded] = useState("100");
-  const [measured, setMeasured] = useState("");
-
-  const move = useMutation({
-    mutationFn: () =>
-      api.control.moveRelative(deviceId, {
-        [axis]: Number(commanded),
-        speed: config.speed,
-      }),
-    onSuccess: () =>
-      toast.info(
-        "Hareket gönderildi",
-        `Durduğunda ${axis.toUpperCase()} ekseninin gerçekte kaç mm gittiğini ölçün`,
-      ),
-    onError: (error) => toast.error("Hareket başarısız", (error as Error).message),
-  });
-
-  function compute() {
-    const next = scaleFromMeasurement(config.scale, Number(commanded), Number(measured));
-    if (next === null) {
-      toast.error("Hesaplanamadı", "Komut ve ölçüm sıfırdan farklı sayı olmalı");
-      return;
-    }
-    onScale(next);
-    setMeasured("");
-    toast.success("Ölçek güncellendi", `Yeni değer ${next.toFixed(5)} — kaydetmeyi unutmayın`);
-  }
-
-  return (
-    <div className="rounded-xl border border-brand/25 bg-brand/5 p-3.5">
-      <p className="mb-1 flex items-center gap-2 text-sm font-medium text-content">
-        <Ruler className="size-4 text-brand" />
-        Ölçüm sihirbazı
-      </p>
-      <p className="mb-3 text-xs text-subtle">
-        Ekseni sürün, cetvelle gerçekte kaç mm gittiğini ölçüp yazın; ölçek kendiliğinden
-        hesaplansın.
-      </p>
-
-      <div className="grid grid-cols-2 gap-2">
-        <Input
-          name={`cmd-${axis}`}
-          label="Komut (mm)"
-          inputMode="decimal"
-          value={commanded}
-          onChange={(e) => setCommanded(e.target.value)}
-        />
-        <Input
-          name={`meas-${axis}`}
-          label="Ölçülen (mm)"
-          inputMode="decimal"
-          placeholder="cetvelle"
-          value={measured}
-          onChange={(e) => setMeasured(e.target.value)}
-        />
-      </div>
-
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <Button
-          size="sm"
-          icon={<Gauge className="size-4" />}
-          loading={move.isPending}
-          onClick={() => move.mutate()}
-        >
-          Hareket ettir
-        </Button>
-        <Button
-          size="sm"
-          variant="primary"
-          icon={<Wand2 className="size-4" />}
-          disabled={!measured.trim()}
-          onClick={compute}
-        >
-          Ölçeği hesapla
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Boş bırakılabilen sayı alanı — yumuşak sınırlar için.
+ * Boş bırakılabilen sayı hücresi.
  *
- * Boş = sınır yok. Bunu ayrı bir bileşen yapmamın sebebi: `NumberField` boş
- * girdiyi yok sayıp eski değeri koruyor; sınırlarda ise boşaltmak anlamlı bir
- * eylem (sınırı kaldırmak) ve kaydedilmesi gerekiyor.
+ * Boş = "makinenin kendi değerini kullan". Değer metin olarak tutuluyor:
+ * doğrudan sayıya bağlarsak kullanıcı "-" ya da "0." yazarken ara durum
+ * geçersiz sayıya dönüşüp imleç sıfırlanıyor.
  */
-function OptionalNumberField({
+function Cell({
   name,
-  label,
   value,
+  placeholder,
   onChange,
 }: {
   name: string;
-  label: string;
   value: number | null;
+  placeholder?: string;
   onChange: (value: number | null) => void;
 }) {
   const [text, setText] = useState(value === null ? "" : String(value));
 
   useEffect(() => {
     const incoming = value === null ? "" : String(value);
-    if (text !== incoming && Number(text) !== value) setText(incoming);
+    if (Number(text) !== value || (value === null && text !== "")) setText(incoming);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   return (
     <Input
       name={name}
-      label={label}
       inputMode="decimal"
-      placeholder="sınır yok"
-      hint={value === null ? "Boş = sınırsız" : undefined}
+      className="w-28"
+      placeholder={placeholder ?? "—"}
       value={text}
       onChange={(e) => {
         const next = e.target.value;
@@ -317,55 +290,9 @@ function OptionalNumberField({
           onChange(null);
           return;
         }
-        const parsed = Number(next);
+        // Türkçe klavyede ondalık ayırıcı virgül; makine noktayla çalışıyor
+        const parsed = Number(next.replace(",", "."));
         if (Number.isFinite(parsed)) onChange(parsed);
-      }}
-    />
-  );
-}
-
-/**
- * Sayı alanı.
- *
- * Değeri metin olarak tutuyor: doğrudan `number` bağlarsak kullanıcı "-" ya da
- * "0." yazarken ara durum geçersiz sayıya dönüşüp imleç sıfırlanıyor.
- */
-function NumberField({
-  name,
-  label,
-  hint,
-  value,
-  step,
-  onChange,
-}: {
-  name: string;
-  label: string;
-  hint?: string;
-  value: number;
-  step?: string;
-  onChange: (value: number) => void;
-}) {
-  const [text, setText] = useState(String(value));
-
-  useEffect(() => {
-    // Dışarıdan gelen değer farklıysa (ör. sihirbaz ölçeği yazdı) alanı tazele
-    if (Number(text) !== value) setText(String(value));
-    // `text` bilerek dışarıda: kullanıcı yazarken kendi kendini ezmesin
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  return (
-    <Input
-      name={name}
-      label={label}
-      hint={hint}
-      inputMode="decimal"
-      step={step}
-      value={text}
-      onChange={(e) => {
-        setText(e.target.value);
-        const parsed = Number(e.target.value);
-        if (e.target.value.trim() !== "" && Number.isFinite(parsed)) onChange(parsed);
       }}
     />
   );

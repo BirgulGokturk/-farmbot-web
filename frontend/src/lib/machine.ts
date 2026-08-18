@@ -11,13 +11,13 @@ export const AXES = ["x", "y", "z"] as const;
 export type AxisName = (typeof AXES)[number];
 
 export interface AxisConfig {
-  /** Komut edilen 1 mm karşılığında makineye yazılan birim. */
-  scale: number;
-  /** Sıfır noktası kaydırması (makine birimi) — X ofseti bu alan. */
-  offset: number;
-  /** Yön ters mi. */
-  invert: boolean;
-  /** Yumuşak sınırlar. `null` = sınır uygulanmıyor. */
+  /** counts/mm — makinenin bir milimetre için saydığı puls. null = makineninki. */
+  cpm: number | null;
+  /** Yön: +1 ya da -1. */
+  dir: 1 | -1;
+  /** Sıfır noktasının mm karşılığı. null = makineninki. */
+  home_mm: number | null;
+  /** Yumuşak sınırlar. null = makinenin kendi sınırı geçerli. */
   min_mm: number | null;
   max_mm: number | null;
   speed: number;
@@ -53,11 +53,11 @@ export interface MachineConfig {
 }
 
 export const AXIS_DEFAULTS: AxisConfig = {
-  scale: 1,
-  offset: 0,
-  invert: false,
-  // Boş başlar: kalibrasyon ayarlanmamış bir makinede varsayılan bir limit
-  // her hareketi reddederdi.
+  // Boş alanlar "makineninkini kullan" demek; varsayılan bir sayı koymak
+  // kalibre edilmemiş bir eksende yanlış davranış üretirdi.
+  cpm: null,
+  dir: 1,
+  home_mm: null,
   min_mm: null,
   max_mm: null,
   speed: 20,
@@ -99,12 +99,10 @@ function optionalNum(value: unknown): number | null {
 
 function readAxis(raw: unknown): AxisConfig {
   const source = (raw ?? {}) as Partial<Record<keyof AxisConfig, unknown>>;
-  const scale = num(source.scale, AXIS_DEFAULTS.scale);
   return {
-    // Ölçek sıfır olursa her hareket sıfır birime çevrilir ve eksen kilitlenir
-    scale: scale === 0 ? AXIS_DEFAULTS.scale : scale,
-    offset: num(source.offset, AXIS_DEFAULTS.offset),
-    invert: Boolean(source.invert),
+    cpm: optionalNum(source.cpm),
+    dir: num(source.dir, 1) < 0 ? -1 : 1,
+    home_mm: optionalNum(source.home_mm),
     min_mm: optionalNum(source.min_mm),
     max_mm: optionalNum(source.max_mm),
     speed: num(source.speed, AXIS_DEFAULTS.speed),
@@ -150,24 +148,23 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
 }
 
 /**
- * Ölçüm sihirbazının hesabı.
+ * Ölçüm sihirbazının hesabı — counts/mm bulur.
  *
- * Kullanıcı "100 mm git" der, cetvelle 700 mm ölçer. Demek ki makine, komut
- * edilen her birim için 7 birim yol alıyor; komutu 7'ye bölerek göndermeliyiz.
- * Yeni ölçek = eski ölçek × (komut edilen / ölçülen).
+ * Kullanıcı "Başlangıcı işaretle" der, ekseni sürer, cetvelle gerçek yolu ölçer.
+ * Makine bu sırada `raw` count kadar saymıştır; counts/mm = sayılan / ölçülen.
  */
-export function scaleFromMeasurement(
-  currentScale: number,
-  commandedMm: number,
+export function cpmFromMeasurement(
+  countsMoved: number,
   measuredMm: number,
 ): number | null {
-  if (!Number.isFinite(commandedMm) || !Number.isFinite(measuredMm)) return null;
-  if (commandedMm === 0 || measuredMm === 0) return null;
-  const next = currentScale * (commandedMm / measuredMm);
-  return Number.isFinite(next) && next !== 0 ? next : null;
+  if (!Number.isFinite(countsMoved) || !Number.isFinite(measuredMm)) return null;
+  if (measuredMm === 0) return null;
+  const cpm = Math.abs(countsMoved / measuredMm);
+  return Number.isFinite(cpm) && cpm > 0 ? cpm : null;
 }
 
-/** Kullanıcı milimetresini makine birimine çevirir (önizleme için). */
-export function toMachine(axis: AxisConfig, userMm: number): number {
-  return axis.offset + (axis.invert ? -1 : 1) * axis.scale * userMm;
+/** Ham count değerini milimetreye çevirir (PLC_BRIEF.md §5). */
+export function mmFromRaw(axis: AxisConfig, raw: number): number {
+  const cpm = axis.cpm ?? 1;
+  return (axis.dir * raw) / (cpm || 1) + (axis.home_mm ?? 0);
 }

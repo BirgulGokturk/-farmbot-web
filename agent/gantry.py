@@ -56,11 +56,12 @@ class OutOfRange(Exception):
 #   önce ve konumu okuduktan sonra kendi dönüşümümüzü uyguluyoruz. Değerler
 #   panelin ayarlar sayfasından geliyor, bulut WebSocket'i üzerinden itiliyor.
 NEUTRAL_AXIS: dict[str, Any] = {
-    "scale": 1.0,
-    "offset": 0.0,
-    "invert": False,
-    # None = sınır yok. Varsayılan bir limit koymak, kalibrasyon hiç
-    # ayarlanmamış bir makinede her hareketi reddederdi.
+    # None olan her alan "makineninkini kullan" demek. Varsayılan bir sayı
+    # koymak, kalibrasyon hiç ayarlanmamış bir makinede yanlış davranış
+    # üretirdi; boş bırakmak `/api/calib`'den geleni yürürlükte tutuyor.
+    "cpm": None,
+    "dir": 1,
+    "home_mm": None,
     "min_mm": None,
     "max_mm": None,
     "speed": 20.0,
@@ -125,7 +126,7 @@ class AxisCalibration:
             ),
         )
 
-    def machine_mm(self, axis: str, raw: float) -> float:
+    def mm_from_raw(self, axis: str, raw: float) -> float:
         """Ham register değerini milimetreye çevirir.
 
         Neden gerekli: Gantry Studio'nun `/api/status` yanıtındaki `pos` alanı
@@ -134,30 +135,22 @@ class AxisCalibration:
         `cpm` katı kadar (X'te ~7, Y'de ~2.2) yanlış gösteriyordu; göreli
         hareket de hedefini bu yanlış sayının üstüne kurduğu için sapıyordu.
 
-        Formül PLC belgesinden birebir alındı (PLC_BRIEF.md §5):
+        Formül PLC belgesinden birebir (PLC_BRIEF.md §5):
             mm = dir * raw / cpm + home
         """
-        cfg = self._machine.get(axis)
-        if cfg is None:
-            # Kalibrasyon henüz okunamadıysa ham değeri olduğu gibi geçiyoruz;
-            # yanlış bir katsayıyla uydurmaktansa dönüştürmemek daha dürüst.
-            return raw
-        return cfg["dir"] * raw / (cfg["cpm"] or 1.0) + cfg["home"]
+        c = self._resolved(axis)
+        return c["dir"] * raw / c["cpm"] + c["home"]
 
     def user_position(self, raw: tuple[float, float, float]) -> tuple[float, float, float]:
         """Ham register üçlüsünü kullanıcı milimetresine çevirir.
 
-        İki aşama var ve sırası önemli:
-          1. **Makine çevrimi** — ham count → milimetre, Gantry Studio'nun
-             kendi `cpm`/`dir`/`home` değerleriyle.
-          2. **Kullanıcı düzeltmesi** — panelden girilen ölçek/ofset/yön.
-             Varsayılanı nötr olduğu için normalde bir şey değiştirmez;
-             makine kalibrasyonu doğruysa buraya dokunmaya gerek yok.
+        Kullanılan `cpm`/`dir`/`home`, panelde girilmişse oradan, yoksa
+        makinenin kendi kalibrasyonundan geliyor.
         """
         return (
-            self.from_machine("x", self.machine_mm("x", raw[0])),
-            self.from_machine("y", self.machine_mm("y", raw[1])),
-            self.from_machine("z", self.machine_mm("z", raw[2])),
+            self.mm_from_raw("x", raw[0]),
+            self.mm_from_raw("y", raw[1]),
+            self.mm_from_raw("z", raw[2]),
         )
 
     def effective_limits(self, axis: str) -> tuple[float | None, float | None]:
@@ -181,31 +174,46 @@ class AxisCalibration:
             if isinstance(incoming, dict):
                 merged = dict(NEUTRAL_AXIS)
                 merged.update(incoming)
-                # Ölçek sıfırsa bölme hatası verir; nötre düş
-                if not merged.get("scale"):
-                    merged["scale"] = 1.0
+                # counts/mm sıfır olursa bölme hatası verir; boşa çevirip
+                # makinenin kendi değerine düşüyoruz
+                if not merged.get("cpm"):
+                    merged["cpm"] = None
                 self._axes[name] = merged
+
+        def describe(axis: str) -> str:
+            resolved = self._resolved(axis)
+            source = "panel" if self._axes[axis].get("cpm") is not None else "makine"
+            return f"{axis.upper()} {resolved['cpm']:g} count/mm ({source})"
+
         logger.info(
             "Kalibrasyon güncellendi — %s",
-            ", ".join(
-                f"{n.upper()} ölçek {self._axes[n]['scale']:g}"
-                f"{' (ters)' if self._axes[n]['invert'] else ''}"
-                for n in ("x", "y", "z")
-            ),
+            ", ".join(describe(n) for n in ("x", "y", "z")),
         )
 
     def get(self, axis: str) -> dict[str, Any]:
         return self._axes.get(axis, NEUTRAL_AXIS)
 
-    def to_machine(self, axis: str, user_mm: float) -> float:
-        cfg = self.get(axis)
-        direction = -1.0 if cfg.get("invert") else 1.0
-        return float(cfg["offset"]) + direction * float(cfg["scale"]) * float(user_mm)
+    def _resolved(self, axis: str) -> dict[str, float]:
+        """Panelden girilen değerlerle makineninkini birleştirir.
 
-    def from_machine(self, axis: str, machine_value: float) -> float:
-        cfg = self.get(axis)
-        direction = -1.0 if cfg.get("invert") else 1.0
-        return direction * (float(machine_value) - float(cfg["offset"])) / float(cfg["scale"])
+        Panel bir alanı boş bıraktıysa makinenin `/api/calib` değeri geçerli.
+        Böylece kullanıcı hiçbir şey ayarlamadan da doğru çalışıyor, ama
+        istediğinde tek tek üzerine yazabiliyor.
+        """
+        user = self.get(axis)
+        machine = self._machine.get(axis, {})
+
+        def pick(user_key: str, machine_key: str, fallback: float) -> float:
+            value = user.get(user_key)
+            if value is None:
+                value = machine.get(machine_key)
+            return float(fallback if value is None else value)
+
+        return {
+            "cpm": pick("cpm", "cpm", 1.0) or 1.0,
+            "dir": float(user.get("dir") or machine.get("dir") or 1),
+            "home": pick("home_mm", "home", 0.0),
+        }
 
     def check_limits(self, axis: str, user_mm: float) -> None:
         """Sınır dışıysa anlaşılır bir hata verir.
@@ -387,17 +395,14 @@ class GantryClient:
         for axis, value in (("x", x), ("y", y), ("z", z)):
             self.calibration.check_limits(axis, value)
 
-        target = [
-            self.calibration.to_machine("x", x),
-            self.calibration.to_machine("y", y),
-            self.calibration.to_machine("z", z),
-        ]
+        # Hedef **milimetre** olarak gidiyor: Gantry Studio'nun `/api/cmd`
+        # arayüzü mm alıp count'a kendi çeviriyor (PLC_BRIEF.md §6). Burada bir
+        # kez daha çevirseydik dönüşüm iki kez uygulanırdı.
         effective = self.calibration.speed_for(moving or ["x", "y", "z"], speed)
         logger.info(
-            "Hedef: X %.1f Y %.1f Z %.1f mm → makine %.2f / %.2f / %.2f (hız %.1f)",
-            x, y, z, target[0], target[1], target[2], effective,
+            "Hedef: X %.1f · Y %.1f · Z %.1f mm (hız %.1f)", x, y, z, effective
         )
-        await self.command({"cmd": "movexyz", "target": target, "speed": effective})
+        await self.command({"cmd": "movexyz", "target": [x, y, z], "speed": effective})
 
     async def go_home(self, axis: str = "all") -> None:
         """Eve dön.
@@ -423,19 +428,61 @@ class GantryClient:
     ) -> None:
         """Tek ekseni hedefe götürür (diğer eksenlere dokunmadan).
 
-        `raw=True` kalibrasyonu atlar; ölçüm sihirbazı ham makine birimiyle
-        hareket ettirip sonucu cetvelle ölçebilsin diye.
+        `raw=True` yumuşak sınır kontrolünü atlar; kalibrasyon sihirbazı
+        sınırlar henüz doğru değilken de ekseni sürebilsin diye.
         """
-        if raw:
-            value = millimetres
-        else:
+        if not raw:
             self.calibration.check_limits(axis, millimetres)
-            value = self.calibration.to_machine(axis, millimetres)
+        value = millimetres
 
         effective = speed if speed is not None else float(self.calibration.get(axis)["speed"])
         await self.command(
             {"cmd": "movej", "axis": AXIS_INDEX[axis], "value": value, "speed": effective}
         )
+
+    async def write_machine_calibration(self, axes: dict[str, Any]) -> None:
+        """Panelde girilen kalibrasyonu Gantry Studio'ya yazar.
+
+        Neden makineye yazıyoruz, kendimizde tutmuyoruz: PLC belgesine göre
+        `gantry_calib.json` tek doğru kaynak (PLC_BRIEF.md §5). Kendi kopyamızı
+        tutsaydık okuma bizim değerimizle, hareket Gantry Studio'nunkiyle
+        yapılırdı — ikisi ayrışınca konum ile gerçek yer birbirini tutmazdı.
+
+        Yazma başarısız olursa **sessiz kalmıyoruz**: kullanıcı kaydet düğmesine
+        bastıysa sonucu görmeli.
+        """
+        payload = []
+        for name in ("x", "y", "z"):
+            cfg = axes.get(name) or {}
+            merged = self.calibration._resolved(name)
+            limits = self.calibration.effective_limits(name)
+            payload.append(
+                {
+                    "cpm": merged["cpm"],
+                    "dir": int(merged["dir"]),
+                    "home": merged["home"],
+                    "min": 0.0 if limits[0] is None else limits[0],
+                    "max": 0.0 if limits[1] is None else limits[1],
+                }
+            )
+
+        try:
+            response = await self._http.post(
+                "/api/calib", json={"calib": payload}, timeout=self._command_timeout
+            )
+            response.raise_for_status()
+            result = response.json()
+        except Exception as exc:
+            raise GantryUnavailable(
+                f"Kalibrasyon Gantry Studio'ya yazılamadı ({exc}). "
+                "Bu sürümde kalibrasyon yazma uç noktası olmayabilir."
+            ) from exc
+
+        if isinstance(result, dict) and not result.get("ok", True):
+            raise GantryUnavailable(result.get("error") or "Kalibrasyon reddedildi")
+
+        await self.refresh_machine_limits()
+        logger.info("Kalibrasyon Gantry Studio'ya yazıldı")
 
     async def apply_motion_profile(self, axis: str) -> None:
         """Eksenin hız/ivme değerlerini Gantry Studio'ya yazar.

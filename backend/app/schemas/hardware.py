@@ -54,6 +54,18 @@ class SensorCreate(BaseModel):
     icon: str = "📊"
     min_value: float = 0.0
     max_value: float = 100.0
+    installed: bool = True
+
+
+class SensorUpdate(BaseModel):
+    """Kısmi güncelleme; şimdilik yalnızca kullanıcının değiştirdiği alanlar."""
+
+    label: str | None = Field(default=None, min_length=1, max_length=120)
+    unit: str | None = None
+    icon: str | None = None
+    min_value: float | None = None
+    max_value: float | None = None
+    installed: bool | None = None
 
 
 class SensorRead(ORMModel):
@@ -68,6 +80,7 @@ class SensorRead(ORMModel):
     icon: str
     min_value: float
     max_value: float
+    installed: bool
 
 
 class SensorReadingCreate(BaseModel):

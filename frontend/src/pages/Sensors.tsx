@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Activity, ListTree, RefreshCw, Trash2 } from "lucide-react";
+import { Activity, Cable, ListTree, RefreshCw, Trash2 } from "lucide-react";
 
 import {
   Badge,
@@ -20,6 +20,7 @@ import {
   PageHeader,
   Select,
   Skeleton,
+  Toggle,
 } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
@@ -101,9 +102,12 @@ export default function Sensors() {
         </div>
       ) : sensors?.length ? (
         <div className="grid gap-5 lg:grid-cols-2">
-          {sensors.map((sensor) => (
-            <SensorCard key={sensor.id} sensor={sensor} hours={hours} />
-          ))}
+          {sensors
+            .filter((sensor) => sensor.installed)
+            .map((sensor) => (
+              <SensorCard key={sensor.id} sensor={sensor} hours={hours} />
+            ))}
+          <UninstalledSensors deviceId={deviceId!} sensors={sensors} />
         </div>
       ) : (
         <Card>
@@ -270,6 +274,70 @@ function SensorCard({ sensor, hours }: { sensor: Sensor; hours: number }) {
           </div>
         </div>
       )}
+    </Card>
+  );
+}
+
+/**
+ * Takılı olmayan sensörler.
+ *
+ * Neden silmiyoruz: Arduino kanalı göndermeye devam ettiği için silinen sensör
+ * ilk ölçümde otomatik yeniden oluşur ve aynı yere döneriz. İşaretlemek hem
+ * kalıcı, hem de sensör gerçekten takıldığında tek tıkla geri açılıyor.
+ */
+function UninstalledSensors({ deviceId, sensors }: { deviceId: string; sensors: Sensor[] }) {
+  const queryClient = useQueryClient();
+  const installed = sensors.filter((sensor) => sensor.installed);
+  const hidden = sensors.filter((sensor) => !sensor.installed);
+
+  const toggle = useMutation({
+    mutationFn: ({ id, next }: { id: string; next: boolean }) =>
+      api.hardware.updateSensor(deviceId, id, { installed: next }),
+    onSuccess: (sensor) => {
+      void queryClient.invalidateQueries({ queryKey: ["sensors", deviceId] });
+      void queryClient.invalidateQueries({ queryKey: ["latest-readings", deviceId] });
+      toast.success(
+        sensor.installed ? `${sensor.label} açıldı` : `${sensor.label} gizlendi`,
+        sensor.installed ? "Grafiklerde yeniden görünecek" : "Ölçümler kaydedilmeye devam eder",
+      );
+    },
+    onError: (error) => toast.error("Değiştirilemedi", (error as Error).message),
+  });
+
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader
+        title="Takılı Sensörler"
+        subtitle="Fiziksel olarak bağlı olmayanları kapatın"
+        icon={<Cable className="size-4" />}
+      />
+      <p className="mb-3 text-xs text-subtle">
+        Arduino, sensör bağlı olmayan analog pini de okur; boştaki pin gürültü üretir ve
+        grafikte gerçek gibi görünen anlamsız bir eğri oluşur. Takılı olmayanı kapatın —
+        ölçümler kaydedilmeye devam eder, sadece gösterilmez.
+      </p>
+      <ul className="space-y-2">
+        {[...installed, ...hidden].map((sensor) => (
+          <li
+            key={sensor.id}
+            className="flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3.5 py-2.5"
+          >
+            <span className="flex min-w-0 items-center gap-2.5">
+              <span className="text-base">{sensor.icon}</span>
+              <span className="min-w-0">
+                <span className="block truncate text-sm text-content">{sensor.label}</span>
+                <span className="font-mono text-xs text-subtle">{sensor.channel}</span>
+              </span>
+            </span>
+            <Toggle
+              checked={sensor.installed}
+              disabled={toggle.isPending}
+              onChange={(next) => toggle.mutate({ id: sensor.id, next })}
+              label={`${sensor.label} takılı`}
+            />
+          </li>
+        ))}
+      </ul>
     </Card>
   );
 }
