@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 import urllib.request
 
 BASE = "http://localhost:8091"
@@ -61,6 +62,7 @@ def main() -> int:
     print("ACIL DURDURMA butonunuz elinizin altinda olsun.\n")
 
     sonuc: dict[str, int] = {}
+    ters: set[str] = set()
 
     for dizin in range(3):
         cevap = input(f"[{dizin}] numarali ekseni oynatalim mi? (e/h/q): ").strip().lower()
@@ -76,11 +78,19 @@ def main() -> int:
 
         once = konumlar()
         try:
-            hedef = list(once)
-            hedef[dizin] = once[dizin] + ADIM_MM
-            istek("/api/cmd", {"cmd": "movexyz", "target": hedef, "speed": 10})
+            # movexyz DEGIL: o safe_goto calistirip her harekette Z'yi de
+            # kaldiriyor, boylece hangi eksenin oynadigi ayirt edilemiyor.
+            # movej yalnizca istenen ekseni surer.
+            istek("/api/cmd", {
+                "cmd": "movej",
+                "axis": dizin,
+                "value": once[dizin] + ADIM_MM,
+                "speed": 10,
+            })
+            time.sleep(2.0)   # hareketin oturmasini bekle
         except Exception as exc:
-            print(f"   Hareket basarisiz: {exc}\n")
+            print(f"   Hareket basarisiz: {exc}")
+            print()
             continue
 
         sonra = konumlar()
@@ -107,7 +117,10 @@ def main() -> int:
     if len(sonuc) == 3:
         print("=" * 60)
         print("SONUC — gantry_axes.json icindeki 'map' bolumunu soyle yapin:\n")
-        print(json.dumps({"map": sonuc}, indent=2))
+        print(json.dumps({
+            "map": sonuc,
+            "invert": {a: (a in ters) for a in ("x", "y", "z")},
+        }, indent=2))
         print("\nSonra:  sudo systemctl restart farmbot-agent")
         print("=" * 60)
     else:
