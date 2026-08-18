@@ -95,28 +95,69 @@ class AxisCalibration:
         self._machine: dict[str, dict[str, float]] = {}
 
     def set_machine_limits(self, calib: list[dict[str, Any]] | None) -> None:
-        """`/api/calib` yanıtındaki min/max değerlerini alır (X, Y, Z sırasıyla)."""
+        """`/api/calib` yanıtını alır (X, Y, Z sırasıyla): cpm, dir, home, min, max."""
         if not isinstance(calib, list):
             return
-        limits: dict[str, dict[str, float]] = {}
+        machine: dict[str, dict[str, float]] = {}
         for name, index in AXIS_INDEX.items():
             if index >= len(calib) or not isinstance(calib[index], dict):
                 continue
             entry = calib[index]
             try:
-                limits[name] = {"min": float(entry["min"]), "max": float(entry["max"])}
+                machine[name] = {
+                    "cpm": float(entry.get("cpm") or 1.0),
+                    "dir": float(entry.get("dir", 1)),
+                    "home": float(entry.get("home", 0.0)),
+                    "min": float(entry["min"]),
+                    "max": float(entry["max"]),
+                }
             except (KeyError, TypeError, ValueError):
                 continue
-        if not limits:
+        if not machine:
             return
-        self._machine = limits
+        self._machine = machine
         logger.info(
-            "Makine sınırları okundu — %s",
+            "Makine kalibrasyonu okundu — %s",
             ", ".join(
-                f"{n.upper()} {limits[n]['min']:.0f}–{limits[n]['max']:.0f} mm"
+                f"{n.upper()} {machine[n]['cpm']:g} count/mm, {machine[n]['min']:.0f}–{machine[n]['max']:.0f} mm"
                 for n in ("x", "y", "z")
-                if n in limits
+                if n in machine
             ),
+        )
+
+    def machine_mm(self, axis: str, raw: float) -> float:
+        """Ham register değerini milimetreye çevirir.
+
+        Neden gerekli: Gantry Studio'nun `/api/status` yanıtındaki `pos` alanı
+        **ham count**, milimetre değil — kendi arayüzü ekranda gösterirken
+        çeviriyor, API ise ham veriyi veriyor. Bunu milimetre sanmak konumu
+        `cpm` katı kadar (X'te ~7, Y'de ~2.2) yanlış gösteriyordu; göreli
+        hareket de hedefini bu yanlış sayının üstüne kurduğu için sapıyordu.
+
+        Formül PLC belgesinden birebir alındı (PLC_BRIEF.md §5):
+            mm = dir * raw / cpm + home
+        """
+        cfg = self._machine.get(axis)
+        if cfg is None:
+            # Kalibrasyon henüz okunamadıysa ham değeri olduğu gibi geçiyoruz;
+            # yanlış bir katsayıyla uydurmaktansa dönüştürmemek daha dürüst.
+            return raw
+        return cfg["dir"] * raw / (cfg["cpm"] or 1.0) + cfg["home"]
+
+    def user_position(self, raw: tuple[float, float, float]) -> tuple[float, float, float]:
+        """Ham register üçlüsünü kullanıcı milimetresine çevirir.
+
+        İki aşama var ve sırası önemli:
+          1. **Makine çevrimi** — ham count → milimetre, Gantry Studio'nun
+             kendi `cpm`/`dir`/`home` değerleriyle.
+          2. **Kullanıcı düzeltmesi** — panelden girilen ölçek/ofset/yön.
+             Varsayılanı nötr olduğu için normalde bir şey değiştirmez;
+             makine kalibrasyonu doğruysa buraya dokunmaya gerek yok.
+        """
+        return (
+            self.from_machine("x", self.machine_mm("x", raw[0])),
+            self.from_machine("y", self.machine_mm("y", raw[1])),
+            self.from_machine("z", self.machine_mm("z", raw[2])),
         )
 
     def effective_limits(self, axis: str) -> tuple[float | None, float | None]:
@@ -260,14 +301,10 @@ class GantryClient:
         data = await self.status()
         if data is None:
             return None
-        machine = extract_position(data)
-        if machine is None:
+        raw = extract_position(data)
+        if raw is None:
             return None
-        return (
-            self.calibration.from_machine("x", machine[0]),
-            self.calibration.from_machine("y", machine[1]),
-            self.calibration.from_machine("z", machine[2]),
-        )
+        return self.calibration.user_position(raw)
 
     async def machine_position(self) -> tuple[float, float, float] | None:
         """Ham makine konumu — kalibrasyon sihirbazı bunu kullanıyor."""
@@ -458,18 +495,10 @@ def to_status_tree(
     Panel FarmBot'un durum ağacı biçimini bekliyor; böylece 3D görünüm, tarla
     tasarımcısı ve manuel kontrol ekranları hiç değişmeden gerçek veriyle çalışır.
     """
-    machine = extract_position(status) or (0.0, 0.0, 0.0)
-    # Panel her yerde kullanıcı milimetresi gösteriyor; ham makine birimi
-    # yalnızca ajanın içinde kalmalı.
-    position = (
-        (
-            calibration.from_machine("x", machine[0]),
-            calibration.from_machine("y", machine[1]),
-            calibration.from_machine("z", machine[2]),
-        )
-        if calibration is not None
-        else machine
-    )
+    raw = extract_position(status) or (0.0, 0.0, 0.0)
+    # Panel her yerde milimetre gösteriyor; ham register değeri yalnızca
+    # ajanın içinde kalmalı.
+    position = calibration.user_position(raw) if calibration is not None else raw
     axes = status.get("axes") or []
 
     def axis_state(index: int) -> str:
