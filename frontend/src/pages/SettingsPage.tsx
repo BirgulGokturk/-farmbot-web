@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
 import { AgentSetup } from "@/components/settings/AgentSetup";
+import { Calibration } from "@/components/settings/Calibration";
 import { AlertRules } from "@/components/settings/AlertRules";
 import { InstallApp } from "@/components/settings/InstallApp";
 import { api } from "@/lib/api";
@@ -39,9 +40,9 @@ export default function SettingsPage() {
       <div className="grid gap-5 lg:grid-cols-2">
         {device && <DeviceSettings device={device} />}
         {device && <WorkspaceSettings device={device} />}
+        {device && <Calibration device={device} />}
         <AgentSetup />
         <HardwareSettings />
-        <AgentSetup />
         <InstallApp />
         <AlertRules />
 

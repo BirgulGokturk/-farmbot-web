@@ -63,6 +63,25 @@ class AgentHub:
     def connected_count(self) -> int:
         return len(self._connections)
 
+    async def send_to(self, device_id: str, message: dict[str, Any]) -> bool:
+        """Yanıt beklemeden tek yönlü mesaj gönderir (ör. yapılandırma itmesi).
+
+        `send_command` bir komut etiketi üretip yanıtı beklerken bu, ajanın
+        cevap vermesi gerekmeyen bildirimler için. Ajan bağlı değilse `False`
+        döner; çağıran bunu hata saymaz — ajan bağlanınca zaten güncel
+        yapılandırmayı ilk mesaj olarak alıyor.
+        """
+        websocket = self._connections.get(device_id)
+        if websocket is None:
+            return False
+        try:
+            await websocket.send_json(message)
+            return True
+        except Exception:
+            logger.info("Ajana mesaj iletilemedi, bağlantı kaldırılıyor: %s", device_id)
+            await self.disconnect(device_id, websocket)
+            return False
+
     # --- Komut gönderimi -------------------------------------------------- #
 
     async def send_command(

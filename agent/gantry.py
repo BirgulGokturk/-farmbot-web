@@ -41,6 +41,103 @@ class GantryUnavailable(Exception):
     """Gantry Studio çalışmıyor ya da yanıt vermiyor."""
 
 
+class OutOfRange(Exception):
+    """Hedef, kullanıcının tanımladığı yumuşak sınırların dışında."""
+
+
+# --------------------------------------------------------------------------- #
+# Eksen kalibrasyonu
+# --------------------------------------------------------------------------- #
+
+# Ölçek/kaydırma neden burada?
+#   Gantry Studio, PLC'ye kendi biriminde yazıyor ve `cpm` (counts-per-mm)
+#   ayarlanmadığında "100 mm git" komutu sahada bambaşka bir mesafeye dönüşüyor.
+#   Gantry Studio ortağın kodu; ona dokunmuyoruz. Bunun yerine komutu göndermeden
+#   önce ve konumu okuduktan sonra kendi dönüşümümüzü uyguluyoruz. Değerler
+#   panelin ayarlar sayfasından geliyor, bulut WebSocket'i üzerinden itiliyor.
+NEUTRAL_AXIS: dict[str, Any] = {
+    "scale": 1.0,
+    "offset": 0.0,
+    "invert": False,
+    "min_mm": 0.0,
+    "max_mm": 1000.0,
+    "speed": 20.0,
+    "accel": 100.0,
+}
+
+
+class AxisCalibration:
+    """Üç eksenin ölçek/kaydırma/yön ve sınır ayarlarını tutar."""
+
+    def __init__(self) -> None:
+        self._axes: dict[str, dict[str, Any]] = {
+            name: dict(NEUTRAL_AXIS) for name in AXIS_INDEX
+        }
+
+    def update(self, axes: dict[str, Any] | None) -> None:
+        if not isinstance(axes, dict):
+            return
+        for name in AXIS_INDEX:
+            incoming = axes.get(name)
+            if isinstance(incoming, dict):
+                merged = dict(NEUTRAL_AXIS)
+                merged.update(incoming)
+                # Ölçek sıfırsa bölme hatası verir; nötre düş
+                if not merged.get("scale"):
+                    merged["scale"] = 1.0
+                self._axes[name] = merged
+        logger.info(
+            "Kalibrasyon güncellendi — %s",
+            ", ".join(
+                f"{n.upper()} ölçek {self._axes[n]['scale']:g}"
+                f"{' (ters)' if self._axes[n]['invert'] else ''}"
+                for n in ("x", "y", "z")
+            ),
+        )
+
+    def get(self, axis: str) -> dict[str, Any]:
+        return self._axes.get(axis, NEUTRAL_AXIS)
+
+    def to_machine(self, axis: str, user_mm: float) -> float:
+        cfg = self.get(axis)
+        direction = -1.0 if cfg.get("invert") else 1.0
+        return float(cfg["offset"]) + direction * float(cfg["scale"]) * float(user_mm)
+
+    def from_machine(self, axis: str, machine_value: float) -> float:
+        cfg = self.get(axis)
+        direction = -1.0 if cfg.get("invert") else 1.0
+        return direction * (float(machine_value) - float(cfg["offset"])) / float(cfg["scale"])
+
+    def check_limits(self, axis: str, user_mm: float) -> None:
+        """Sınır dışıysa anlaşılır bir hata verir.
+
+        Gantry Studio da kendi sınırlarını uyguluyor ama onun mesajı makine
+        birimindeki sayıyı söylüyor; kullanıcı panelde milimetre görüyor.
+        Kendi sınırımızı önce kontrol edip anlaşılır mesaj veriyoruz.
+        """
+        cfg = self.get(axis)
+        low, high = float(cfg["min_mm"]), float(cfg["max_mm"])
+        if not (low <= user_mm <= high):
+            raise OutOfRange(
+                f"{axis.upper()} ekseni {user_mm:.1f} mm hedefine gidemez; "
+                f"izin verilen aralık {low:.0f} – {high:.0f} mm."
+            )
+
+    def speed_for(self, axes: list[str], requested: float) -> float:
+        """İstenen hızı, hareket eden eksenlerin hız tavanıyla sınırlar.
+
+        Eksen ayarındaki hız bir **üst sınır**; panelin hız kaydırıcısı bunun
+        altında serbest. Tersini yapsaydık (doğrudan eksen hızını dayatsaydık)
+        manuel kontroldeki kaydırıcı işlevsiz kalırdı.
+
+        `movexyz` tek bir hız alıyor; birden çok eksen hareket ediyorsa en
+        düşük tavan geçerli olmalı, yoksa yavaş eksen kapasitesinin üzerine
+        zorlanır.
+        """
+        limits = [float(self.get(name)["speed"]) for name in axes if name in AXIS_INDEX]
+        return min([requested, *limits]) if limits else requested
+
+
 class GantryClient:
     def __init__(
         self,
@@ -64,6 +161,8 @@ class GantryClient:
         self._http = httpx.AsyncClient(base_url=self.base_url, headers=headers)
         # Bağlantı kopunca her denemede hata basmamak için durum takibi
         self._was_reachable: bool | None = None
+        # Panelden gelen eksen kalibrasyonu; bulut bağlanınca dolduruluyor
+        self.calibration = AxisCalibration()
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -94,11 +193,23 @@ class GantryClient:
         return data
 
     async def position(self) -> tuple[float, float, float] | None:
-        """Anlık X/Y/Z konumu (mm). Okunamazsa None."""
+        """Anlık X/Y/Z konumu, **kullanıcı milimetresinde**. Okunamazsa None."""
         data = await self.status()
         if data is None:
             return None
-        return extract_position(data)
+        machine = extract_position(data)
+        if machine is None:
+            return None
+        return (
+            self.calibration.from_machine("x", machine[0]),
+            self.calibration.from_machine("y", machine[1]),
+            self.calibration.from_machine("z", machine[2]),
+        )
+
+    async def machine_position(self) -> tuple[float, float, float] | None:
+        """Ham makine konumu — kalibrasyon sihirbazı bunu kullanıyor."""
+        data = await self.status()
+        return None if data is None else extract_position(data)
 
     # ------------------------------------------------------------------ #
     # Komutlar
@@ -137,9 +248,35 @@ class GantryClient:
             raise GantryUnavailable(result.get("error") or "Hareket komutu reddedildi")
         return result
 
-    async def move_xyz(self, x: float, y: float, z: float, speed: float = 20.0) -> None:
-        """Güvenli rotayla hedefe git (Z kaldır → yatayda git → indir)."""
-        await self.command({"cmd": "movexyz", "target": [x, y, z], "speed": speed})
+    async def move_xyz(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        speed: float = 20.0,
+        *,
+        moving: list[str] | None = None,
+    ) -> None:
+        """Güvenli rotayla hedefe git (Z kaldır → yatayda git → indir).
+
+        x/y/z **kullanıcı milimetresi**; sınır kontrolü ve makine birimine
+        çevirme burada yapılıyor. `moving`, hız seçiminde hangi eksenlerin
+        gerçekten hareket ettiğini bildirir.
+        """
+        for axis, value in (("x", x), ("y", y), ("z", z)):
+            self.calibration.check_limits(axis, value)
+
+        target = [
+            self.calibration.to_machine("x", x),
+            self.calibration.to_machine("y", y),
+            self.calibration.to_machine("z", z),
+        ]
+        effective = self.calibration.speed_for(moving or ["x", "y", "z"], speed)
+        logger.info(
+            "Hedef: X %.1f Y %.1f Z %.1f mm → makine %.2f / %.2f / %.2f (hız %.1f)",
+            x, y, z, target[0], target[1], target[2], effective,
+        )
+        await self.command({"cmd": "movexyz", "target": target, "speed": effective})
 
     async def go_home(self, axis: str = "all") -> None:
         """Eve dön.
@@ -160,9 +297,41 @@ class GantryClient:
             }
         )
 
-    async def move_axis(self, axis: str, millimetres: float, speed: float = 20.0) -> None:
+    async def move_axis(
+        self, axis: str, millimetres: float, speed: float | None = None, *, raw: bool = False
+    ) -> None:
+        """Tek ekseni hedefe götürür (diğer eksenlere dokunmadan).
+
+        `raw=True` kalibrasyonu atlar; ölçüm sihirbazı ham makine birimiyle
+        hareket ettirip sonucu cetvelle ölçebilsin diye.
+        """
+        if raw:
+            value = millimetres
+        else:
+            self.calibration.check_limits(axis, millimetres)
+            value = self.calibration.to_machine(axis, millimetres)
+
+        effective = speed if speed is not None else float(self.calibration.get(axis)["speed"])
         await self.command(
-            {"cmd": "movej", "axis": AXIS_INDEX[axis], "value": millimetres, "speed": speed}
+            {"cmd": "movej", "axis": AXIS_INDEX[axis], "value": value, "speed": effective}
+        )
+
+    async def apply_motion_profile(self, axis: str) -> None:
+        """Eksenin hız/ivme değerlerini Gantry Studio'ya yazar.
+
+        Bu, her hareketle değil yalnızca kullanıcı ayarlar sayfasından açıkça
+        istediğinde çağrılıyor: PLC'ye yazan bir işlem sessizce arka planda
+        çalışmamalı.
+        """
+        cfg = self.calibration.get(axis)
+        await self.command(
+            {
+                "cmd": "speed",
+                "axis": AXIS_INDEX[axis],
+                "vel": float(cfg["speed"]),
+                "accel": float(cfg["accel"]),
+                "decel": float(cfg["accel"]),
+            }
         )
 
     async def emergency_stop(self) -> None:
@@ -197,13 +366,26 @@ def extract_position(status: dict[str, Any]) -> tuple[float, float, float] | Non
     return values[0], values[1], values[2]
 
 
-def to_status_tree(status: dict[str, Any]) -> dict[str, Any]:
+def to_status_tree(
+    status: dict[str, Any], calibration: "AxisCalibration | None" = None
+) -> dict[str, Any]:
     """Gantry Studio yanıtını panelin beklediği durum ağacına çevirir.
 
     Panel FarmBot'un durum ağacı biçimini bekliyor; böylece 3D görünüm, tarla
     tasarımcısı ve manuel kontrol ekranları hiç değişmeden gerçek veriyle çalışır.
     """
-    position = extract_position(status) or (0.0, 0.0, 0.0)
+    machine = extract_position(status) or (0.0, 0.0, 0.0)
+    # Panel her yerde kullanıcı milimetresi gösteriyor; ham makine birimi
+    # yalnızca ajanın içinde kalmalı.
+    position = (
+        (
+            calibration.from_machine("x", machine[0]),
+            calibration.from_machine("y", machine[1]),
+            calibration.from_machine("z", machine[2]),
+        )
+        if calibration is not None
+        else machine
+    )
     axes = status.get("axes") or []
 
     def axis_state(index: int) -> str:

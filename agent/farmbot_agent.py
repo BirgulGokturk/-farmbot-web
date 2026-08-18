@@ -339,7 +339,7 @@ class Agent:
             if status is None:
                 continue
 
-            tree = to_status_tree(status)
+            tree = to_status_tree(status, self.gantry.calibration)
             position = tree["location_data"]["position"]
             # Konumu 0.1 mm çözünürlükte imzala: gürültüden dolayı sürekli
             # mesaj gitmesin
@@ -365,11 +365,21 @@ class Agent:
         except json.JSONDecodeError:
             return
 
-        if message.get("type") == "ping":
+        kind = message.get("type")
+
+        if kind == "ping":
             await socket.send(json.dumps({"type": "pong"}))
             return
 
-        if message.get("type") != "rpc":
+        # Eksen kalibrasyonu panelden geliyor. Bulut bunu bağlantının ilk
+        # mesajı olarak, sonra da ayarlar her değiştiğinde gönderiyor; böylece
+        # ajanı yeniden başlatmadan yeni ölçek devreye giriyor.
+        if kind == "config":
+            if self.gantry is not None:
+                self.gantry.calibration.update((message.get("payload") or {}).get("axes"))
+            return
+
+        if kind != "rpc":
             return
 
         # Komutu AYRI bir görevde çalıştırıyoruz.
@@ -489,11 +499,17 @@ class Agent:
             current = await self.gantry.position()
             if current is None:
                 raise RuntimeError("Mevcut konum okunamadı; göreli hareket yapılamıyor")
-            x = current[0] + float(args.get("x", 0) or 0)
-            y = current[1] + float(args.get("y", 0) or 0)
-            z = current[2] + float(args.get("z", 0) or 0)
-            logger.info("Göreli hareket → X %.1f · Y %.1f · Z %.1f", x, y, z)
-            await self.gantry.move_xyz(x, y, z, speed)
+            dx = float(args.get("x", 0) or 0)
+            dy = float(args.get("y", 0) or 0)
+            dz = float(args.get("z", 0) or 0)
+            x, y, z = current[0] + dx, current[1] + dy, current[2] + dz
+            # Yalnızca gerçekten değişen eksenlerin hız ayarı dikkate alınsın
+            moving = [n for n, d in (("x", dx), ("y", dy), ("z", dz)) if d]
+            logger.info(
+                "Göreli hareket %s → X %.1f · Y %.1f · Z %.1f",
+                "/".join(moving).upper() or "-", x, y, z,
+            )
+            await self.gantry.move_xyz(x, y, z, speed, moving=moving)
 
         elif kind in {"home", "find_home"}:
             axis = str(args.get("axis", "all")).lower()

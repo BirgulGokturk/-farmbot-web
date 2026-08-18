@@ -16,9 +16,10 @@ import logging
 import secrets
 import uuid
 from datetime import datetime, timezone
+from time import monotonic
 
 from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DbSession, OwnedDevice
@@ -31,6 +32,7 @@ from app.schemas.agent import (
     AgentTokenResponse,
     AgentStatusRead,
 )
+from app.services import machine_config
 from app.services.agents import agent_hub
 from app.services.realtime import hub
 
@@ -219,6 +221,20 @@ async def ingest_readings(
     return AgentIngestResult(stored=stored, created_channels=created_channels)
 
 
+async def push_machine_config(device: Device) -> bool:
+    """Kalibrasyon değişince bağlı ajana anında bildirir.
+
+    Ajan yeniden başlatılmadan yeni ölçek/kaydırma değerleriyle çalışsın diye:
+    kullanıcı ayarlar sayfasında ölçüm sihirbazını bitirdiğinde bir sonraki
+    hareket zaten düzeltilmiş olmalı. Ajan bağlı değilse sessizce geçilir —
+    bağlanınca zaten ilk mesaj olarak yapılandırmayı alıyor.
+    """
+    axes = machine_config.axis_config(device.settings)
+    return await agent_hub.send_to(
+        str(device.id), {"type": "config", "payload": {"axes": axes}}
+    )
+
+
 def _auto_create_sensor(device_id: uuid.UUID, channel: str) -> Sensor:
     """Bilinmeyen bir kanal için makul varsayılanlarla sensör kaydı üretir."""
     from app.services.channels import describe_channel
@@ -257,8 +273,14 @@ async def agent_socket(websocket: WebSocket, token: str | None = None) -> None:
             return
 
         device_id = str(device.id)
-        device.agent_last_seen_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        device.agent_last_seen_at = now
+        # Bağlantı anında da çevrimiçi sayılsın; ilk durum mesajını beklemeden
+        device.last_seen_at = now
+        machine = machine_config.normalize(device.settings)
         await session.commit()
+
+    _last_touch[device_id] = monotonic()
 
     await agent_hub.connect(device_id, websocket)
     logger.info("Köprü ajanı bağlandı: %s", device_id)
@@ -267,6 +289,11 @@ async def agent_socket(websocket: WebSocket, token: str | None = None) -> None:
     from app.services.simulator import simulator
 
     await simulator.stop_device(device_id)
+
+    # Kalibrasyon ajanın elinde olmalı: hareket komutu Gantry Studio'ya
+    # gitmeden önce eksen ölçeği/kaydırması ajanda uygulanıyor. Bağlantının
+    # ilk mesajı bu olsun ki ajan hiçbir zaman kalibrasyonsuz komut çalıştırmasın.
+    await websocket.send_json({"type": "config", "payload": {"axes": machine["axes"]}})
 
     await hub.broadcast(device_id, {"type": "agent", "payload": {"connected": True}})
 
@@ -284,9 +311,41 @@ async def agent_socket(websocket: WebSocket, token: str | None = None) -> None:
         logger.info("Köprü ajanı ayrıldı: %s", device_id)
 
 
+# Ajandan mesaj geldikçe `last_seen_at` tazeleniyor, ama her mesajda değil:
+# hareket sırasında saniyede iki durum mesajı geliyor ve her biri için veritabanı
+# yazmak anlamsız. 20 saniye, 60 saniyelik çevrimdışı eşiğinin rahat altında.
+_TOUCH_INTERVAL_SECONDS = 20.0
+_last_touch: dict[str, float] = {}
+
+
+async def _touch_device(device_id: str) -> None:
+    """Ajan hayattayken cihazı çevrimiçi tutar.
+
+    Bu olmadan cihaz yalnızca sensör ölçümü aktıkça çevrimiçi görünüyordu:
+    Arduino çıkarıldığında ya da yalnızca PLC bağlıyken panel, ajan bağlı
+    olmasına rağmen 60 saniye sonra "Çevrimdışı" gösteriyordu.
+    """
+    now = monotonic()
+    if now - _last_touch.get(device_id, 0.0) < _TOUCH_INTERVAL_SECONDS:
+        return
+    _last_touch[device_id] = now
+
+    stamp = datetime.now(timezone.utc)
+    async with SessionLocal() as session:
+        await session.execute(
+            update(Device)
+            .where(Device.id == uuid.UUID(device_id))
+            .values(last_seen_at=stamp, agent_last_seen_at=stamp)
+        )
+        await session.commit()
+
+
 async def _handle_agent_message(device_id: str, message: dict) -> None:
     """Ajandan gelen mesajları işler (komut yanıtı, log, durum)."""
     kind = message.get("type")
+
+    # Hangi tür olursa olsun: mesaj geldiyse ajan ayakta demektir
+    await _touch_device(device_id)
 
     if kind == "rpc_result":
         agent_hub.resolve(message.get("label"), message.get("payload") or {})
@@ -300,7 +359,7 @@ async def _handle_agent_message(device_id: str, message: dict) -> None:
         await hub.broadcast(device_id, {"type": "log", "payload": message.get("payload") or {}})
 
     elif kind == "pong":
-        # Canlılık sinyali; ek iş gerekmiyor
+        # Canlılık sinyali; `_touch_device` zaten çalıştı
         pass
 
 

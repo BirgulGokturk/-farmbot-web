@@ -9,7 +9,8 @@ from app.api.deps import CurrentUser, DbSession, OwnedDevice
 from app.models import Device
 from app.schemas.common import Message
 from app.schemas.device import DeviceCreate, DeviceRead, DeviceStatusRead, DeviceUpdate
-from app.services import gateway
+from app.api.v1.agent import push_machine_config
+from app.services import gateway, machine_config
 from app.services.realtime import hub
 
 router = APIRouter(prefix="/devices", tags=["Cihazlar"])
@@ -42,10 +43,25 @@ async def update_device(
     payload: DeviceUpdate, device: OwnedDevice, db: DbSession
 ) -> Device:
     # exclude_unset: gönderilmeyen alanlar mevcut değerini korur
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+
+    # `settings` serbest bir JSON sütunu; kalibrasyon da içinde. Arayüzden gelen
+    # değeri olduğu gibi yazmıyoruz: ölçek 0 ya da NaN gelirse her hareket
+    # bozulurdu. Normalleştirme eksik alanları varsayılanla tamamlar, saçma
+    # değerleri geri çevirir, bilinmeyen anahtarları korur.
+    if "settings" in changes:
+        changes["settings"] = machine_config.normalize(changes["settings"])
+
+    for field, value in changes.items():
         setattr(device, field, value)
     await db.commit()
     await db.refresh(device)
+
+    # Kalibrasyon değiştiyse bağlı ajan bunu hemen bilmeli; aksi hâlde yeni
+    # ölçek ancak ajan yeniden başlatılınca devreye girerdi.
+    if "settings" in changes:
+        await push_machine_config(device)
+
     return device
 
 

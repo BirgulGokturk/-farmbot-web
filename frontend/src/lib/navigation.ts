@@ -17,6 +17,7 @@ import {
   ScrollText,
   Settings,
   Workflow,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -81,6 +82,12 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Diziler",
         icon: Workflow,
         description: "Yeniden kullanılabilir komut dizileri",
+      },
+      {
+        path: "/tool-zone",
+        label: "Uç Değiştirme",
+        icon: Wrench,
+        description: "Uç yuvalarının konumları ve güvenli yaklaşma",
       },
     ],
   },

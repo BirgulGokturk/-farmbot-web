@@ -15,6 +15,7 @@ const Viewer3D = lazy(() => import("@/pages/Viewer3D"));
 const Sensors = lazy(() => import("@/pages/Sensors"));
 const CameraPage = lazy(() => import("@/pages/CameraPage"));
 const Sequences = lazy(() => import("@/pages/Sequences"));
+const ToolZone = lazy(() => import("@/pages/ToolZone"));
 const Plants = lazy(() => import("@/pages/Plants"));
 const Curves = lazy(() => import("@/pages/Curves"));
 const Schedule = lazy(() => import("@/pages/Schedule"));
@@ -64,6 +65,7 @@ export default function App() {
           <Route path="sensors" element={<Sensors />} />
           <Route path="control" element={<ManualControl />} />
           <Route path="sequences" element={<Sequences />} />
+          <Route path="tool-zone" element={<ToolZone />} />
           <Route path="designer" element={<Designer />} />
           <Route path="plants" element={<Plants />} />
           <Route path="curves" element={<Curves />} />
