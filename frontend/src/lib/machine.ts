@@ -48,6 +48,8 @@ export interface ViewerConfig {
 
 export interface MachineConfig {
   axes: Record<AxisName, AxisConfig>;
+  /** Yumuşak sınırlar uygulansın mı? Kapalıyken hiçbir hedef reddedilmez. */
+  limits_enabled: boolean;
   tool_zone: ToolZoneConfig;
   viewer: ViewerConfig;
 }
@@ -118,6 +120,7 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
   const rawViewer = (source.viewer ?? {}) as Record<string, unknown>;
 
   return {
+    limits_enabled: source.limits_enabled !== false,
     axes: {
       x: readAxis(rawAxes.x),
       y: readAxis(rawAxes.y),

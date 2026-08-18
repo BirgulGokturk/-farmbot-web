@@ -9,7 +9,6 @@
  * konumundan da alınabiliyor — cetvelle ölçmekten çok daha pratik.
  */
 
-import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Crosshair, MapPin, Plus, Save, Trash2, Wrench } from "lucide-react";
 
@@ -26,6 +25,7 @@ import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { readMachineConfig, type ToolSlot } from "@/lib/machine";
 import { useActiveDevice } from "@/hooks/useDevice";
+import { useServerForm } from "@/hooks/useServerForm";
 import { useBot, useBotPosition } from "@/store/useBot";
 
 export default function ToolZone() {
@@ -35,11 +35,9 @@ export default function ToolZone() {
   const locked = useBot((s) => s.status?.locked ?? false);
 
   const stored = readMachineConfig(device?.settings);
-  const [zone, setZone] = useState(stored.tool_zone);
-
-  useEffect(() => {
-    if (device) setZone(readMachineConfig(device.settings).tool_zone);
-  }, [device?.id, device?.settings]);
+  // Sunucudaki değer gerçekten değişmedikçe form sıfırlanmasın; nesne kimliğine
+  // bakan bir efekt, araya giren her yenilemede düzenlemeyi siliyordu.
+  const [zone, setZone, zoneDirty] = useServerForm(stored.tool_zone);
 
   const save = useMutation({
     mutationFn: () =>
@@ -103,7 +101,7 @@ export default function ToolZone() {
     );
   }
 
-  const dirty = JSON.stringify(zone) !== JSON.stringify(stored.tool_zone);
+  const dirty = zoneDirty;
 
   function patchSlot(index: number, changes: Partial<ToolSlot>) {
     setZone((previous) => ({

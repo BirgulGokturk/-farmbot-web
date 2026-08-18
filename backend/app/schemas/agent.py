@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -43,3 +44,13 @@ class AgentStatusRead(BaseModel):
     token_created_at: datetime | None
     connected: bool
     last_seen_at: datetime | None
+
+
+class AgentPhotoResult(BaseModel):
+    """Yükleme sonucu — ajan günlüğünde ne olduğu görünsün."""
+
+    id: uuid.UUID
+    url: str
+    bytes: int
+    # Saklama sınırı aşıldığı için silinen eski kare sayısı
+    discarded: int = 0

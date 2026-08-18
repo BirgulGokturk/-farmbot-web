@@ -17,7 +17,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ruler, Save } from "lucide-react";
 
-import { Badge, Button, Card, CardHeader, Input } from "@/components/ui/primitives";
+import { Badge, Button, Card, CardHeader, Input, Toggle } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import {
@@ -28,25 +28,28 @@ import {
   type AxisConfig,
   type AxisName,
 } from "@/lib/machine";
+import { useServerForm } from "@/hooks/useServerForm";
 import { useBotPosition } from "@/store/useBot";
 import type { Device } from "@/lib/types";
 
 export function Calibration({ device }: { device: Device }) {
   const queryClient = useQueryClient();
   const stored = readMachineConfig(device.settings);
-  const [axes, setAxes] = useState(stored.axes);
+  // Sunucudaki değer gerçekten değişmedikçe formu sıfırlamıyoruz; yoksa araya
+  // giren her yenileme kullanıcının yazdıklarını siliyordu.
+  const [axes, setAxes, axesDirty] = useServerForm(stored.axes);
+  const [limitsOn, setLimitsOn, limitsDirty] = useServerForm(stored.limits_enabled);
   const position = useBotPosition();
 
   /** Ölçüm sihirbazının eksen başına işaretlediği başlangıç konumu (mm). */
   const [marks, setMarks] = useState<Partial<Record<AxisName, number>>>({});
   const [measured, setMeasured] = useState<Partial<Record<AxisName, string>>>({});
 
-  useEffect(() => {
-    setAxes(readMachineConfig(device.settings).axes);
-  }, [device.id, device.settings]);
-
   const save = useMutation({
-    mutationFn: () => api.devices.update(device.id, { settings: { ...device.settings, axes } }),
+    mutationFn: () =>
+      api.devices.update(device.id, {
+        settings: { ...device.settings, axes, limits_enabled: limitsOn },
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["device", device.id] });
       void queryClient.invalidateQueries({ queryKey: ["devices"] });
@@ -93,7 +96,7 @@ export function Calibration({ device }: { device: Device }) {
     );
   }
 
-  const dirty = JSON.stringify(axes) !== JSON.stringify(stored.axes);
+  const dirty = axesDirty || limitsDirty;
 
   return (
     <Card className="lg:col-span-2">
@@ -118,7 +121,7 @@ export function Calibration({ device }: { device: Device }) {
 
       {/* Dar ekranda tablo kendi içinde yatayda kaysın; sayfa gövdesi kaymasın */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] border-collapse text-sm">
+        <table className="w-full min-w-[1040px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs text-subtle">
               <th className="px-2 py-2 font-medium">Eksen</th>
@@ -127,6 +130,8 @@ export function Calibration({ device }: { device: Device }) {
               <th className="px-2 py-2 font-medium">Home mm</th>
               <th className="px-2 py-2 font-medium">Min mm</th>
               <th className="px-2 py-2 font-medium">Max mm</th>
+              <th className="px-2 py-2 font-medium">Hız</th>
+              <th className="px-2 py-2 font-medium">İvme</th>
               <th className="px-2 py-2 font-medium">Anlık mm</th>
               <th className="px-2 py-2 font-medium">Kalibrasyon</th>
             </tr>
@@ -180,6 +185,21 @@ export function Calibration({ device }: { device: Device }) {
                     />
                   </td>
 
+                  <td className="px-2 py-2.5">
+                    <Cell
+                      name={`speed-${axis}`}
+                      value={config.speed}
+                      onChange={(value) => patch(axis, { speed: value ?? 20 })}
+                    />
+                  </td>
+                  <td className="px-2 py-2.5">
+                    <Cell
+                      name={`accel-${axis}`}
+                      value={config.accel}
+                      onChange={(value) => patch(axis, { accel: value ?? 100 })}
+                    />
+                  </td>
+
                   <td className="px-2 py-2.5 font-mono text-brand">
                     {position[axis].toFixed(2)}
                   </td>
@@ -223,6 +243,26 @@ export function Calibration({ device }: { device: Device }) {
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* Yumuşak sınırlar kapatılabilir olmalı ama neyin riske girdiği yazılı
+          dursun: PLC belgesi sınırları uygulamayı açıkça uygulamanın işi
+          sayıyor, PLC kendisi durdurmuyor. */}
+      <div className="mt-4 flex items-center justify-between rounded-xl border border-warning/30 bg-warning/10 px-3.5 py-3">
+        <div className="pr-4">
+          <p className="text-sm font-medium text-content">Yumuşak sınırları uygula</p>
+          <p className="text-xs text-muted">
+            Kapatırsanız Min/Max değerleri yok sayılır ve hiçbir hedef reddedilmez.
+            PLC kendi başına durdurmuyor — sınır dışına çıkan eksen mekanik dayanağa
+            çarpar. Yalnızca kalibrasyon yaparken kapatın.
+          </p>
+        </div>
+        <Toggle
+          checked={limitsOn}
+          onChange={setLimitsOn}
+          label="Yumuşak sınırları uygula"
+          tone="warning"
+        />
       </div>
 
       {/* Kaydetmeden önce sonucu somut görmek, yanlış bir counts/mm değerini

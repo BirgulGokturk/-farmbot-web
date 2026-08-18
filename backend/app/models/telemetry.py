@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import BigInteger, DateTime, Enum as SAEnum
-from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text, Uuid
+from sqlalchemy import Float, ForeignKey, Index, Integer, LargeBinary, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, JSONType, TimestampMixin, UUIDPrimaryKeyMixin
@@ -62,3 +62,20 @@ class Image(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Çözünürlük, kalibrasyon, yabani ot tespiti sonuçları vb.
     meta: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+
+    # --- Görüntünün kendisi ---
+    #
+    # Kare neden veritabanında, diskte değil?
+    #   Render'ın ücretsiz katmanında kalıcı disk yok: konteyner her yeniden
+    #   başladığında ve her dağıtımda dosya sistemi sıfırlanıyor. Diske yazsaydık
+    #   fotoğraflar bir sonraki dağıtımda kaybolurdu. Bir nesne deposu (S3 vb.)
+    #   yeni hesap ve anahtar demek; bahçe kamerasının birkaç yüz karesi için
+    #   veritabanı sütunu hem yeterli hem de bedava.
+    #
+    #   640×480 bir JPEG ~50 KB; saklama sınırıyla birlikte (bkz. PHOTO_RETENTION)
+    #   toplam birkaç megabaytta kalıyor.
+    #
+    # `deferred`: liste sorguları görüntü baytlarını çekmesin — galeri 100 kayıt
+    # listelerken 5 MB veri taşımak anlamsız olurdu.
+    data: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
+    content_type: Mapped[str] = mapped_column(String(60), default="image/jpeg")

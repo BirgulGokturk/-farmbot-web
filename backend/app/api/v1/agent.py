@@ -18,20 +18,34 @@ import uuid
 from datetime import datetime, timezone
 from time import monotonic
 
-from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect, status
-from sqlalchemy import select, update
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
+from sqlalchemy import delete as sa_delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DbSession, OwnedDevice
 from app.core.security import hash_password, verify_password
 from app.db.session import SessionLocal, get_db
-from app.models import Device, Sensor, SensorReading
+from app.core.config import settings
+from app.models import Device, Image, Sensor, SensorReading
 from app.schemas.agent import (
     AgentIngestRequest,
     AgentIngestResult,
+    AgentPhotoResult,
     AgentTokenResponse,
     AgentStatusRead,
 )
+from app.api.v1.telemetry import PHOTO_RETENTION
 from app.services import machine_config
 from app.services.agents import agent_hub
 from app.services.realtime import hub
@@ -230,9 +244,16 @@ async def push_machine_config(device: Device) -> bool:
     hareket zaten düzeltilmiş olmalı. Ajan bağlı değilse sessizce geçilir —
     bağlanınca zaten ilk mesaj olarak yapılandırmayı alıyor.
     """
-    axes = machine_config.axis_config(device.settings)
+    machine = machine_config.normalize(device.settings)
     return await agent_hub.send_to(
-        str(device.id), {"type": "config", "payload": {"axes": axes}}
+        str(device.id),
+        {
+            "type": "config",
+            "payload": {
+                "axes": machine["axes"],
+                "limits_enabled": machine["limits_enabled"],
+            },
+        },
     )
 
 
@@ -252,6 +273,80 @@ def _auto_create_sensor(device_id: uuid.UUID, channel: str) -> Sensor:
         max_value=spec.max_value,
         pin=None,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Fotoğraf yükleme
+# --------------------------------------------------------------------------- #
+
+# Tek karenin üst sınırı. Bahçe kamerasının 640×480 JPEG'i ~50 KB; 4 MB, yanlış
+# yapılandırılmış bir çözünürlüğün veritabanını doldurmasını engelliyor.
+MAX_PHOTO_BYTES = 4 * 1024 * 1024
+
+
+@router.post("/agent/photo", response_model=AgentPhotoResult)
+async def upload_photo(
+    db: DbSession,
+    file: UploadFile = File(..., description="JPEG/PNG kare"),
+    x: float | None = Form(default=None),
+    y: float | None = Form(default=None),
+    z: float | None = Form(default=None),
+    device: Device = Depends(current_agent_device),
+) -> AgentPhotoResult:
+    """Ajanın çektiği kareyi kaydeder.
+
+    Kare veritabanında saklanıyor; sebebi `Image.data` alanının yanındaki notta:
+    Render'ın ücretsiz katmanında kalıcı disk yok, diske yazılan her şey ilk
+    yeniden başlatmada kayboluyor.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Boş dosya")
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"Kare çok büyük ({len(data) // 1024} KB); üst sınır "
+            f"{MAX_PHOTO_BYTES // 1024} KB. Kamera çözünürlüğünü düşürün.",
+        )
+
+    now = datetime.now(timezone.utc)
+    image = Image(
+        device_id=device.id,
+        url="",  # kaydedildikten sonra kendi kimliğiyle dolduruluyor
+        x=x if x is not None else device.last_x,
+        y=y if y is not None else device.last_y,
+        z=z if z is not None else device.last_z,
+        captured_at=now,
+        data=data,
+        content_type=file.content_type or "image/jpeg",
+        meta={"bytes": len(data), "filename": file.filename or ""},
+    )
+    db.add(image)
+    await db.flush()
+
+    image.url = f"{settings.API_V1_PREFIX}/devices/{device.id}/images/{image.id}/file"
+
+    # Eski kareleri at: görüntüler veritabanında duruyor, sınırsız büyüyemez.
+    old = (
+        await db.execute(
+            select(Image.id)
+            .where(Image.device_id == device.id)
+            .order_by(Image.captured_at.desc().nullslast(), Image.created_at.desc())
+            .offset(PHOTO_RETENTION)
+        )
+    ).scalars().all()
+    if old:
+        await db.execute(sa_delete(Image).where(Image.id.in_(old)))
+
+    device.agent_last_seen_at = now
+    device.last_seen_at = now
+    await db.commit()
+
+    await hub.broadcast(
+        str(device.id),
+        {"type": "image", "payload": {"id": str(image.id), "url": image.url}},
+    )
+    return AgentPhotoResult(id=image.id, url=image.url, bytes=len(data), discarded=len(old))
 
 
 # --------------------------------------------------------------------------- #
@@ -294,7 +389,15 @@ async def agent_socket(websocket: WebSocket, token: str | None = None) -> None:
     # Kalibrasyon ajanın elinde olmalı: hareket komutu Gantry Studio'ya
     # gitmeden önce eksen ölçeği/kaydırması ajanda uygulanıyor. Bağlantının
     # ilk mesajı bu olsun ki ajan hiçbir zaman kalibrasyonsuz komut çalıştırmasın.
-    await websocket.send_json({"type": "config", "payload": {"axes": machine["axes"]}})
+    await websocket.send_json(
+        {
+            "type": "config",
+            "payload": {
+                "axes": machine["axes"],
+                "limits_enabled": machine["limits_enabled"],
+            },
+        }
+    )
 
     await hub.broadcast(device_id, {"type": "agent", "payload": {"connected": True}})
 

@@ -6,7 +6,7 @@
  * robotun canlı konumuna göre hareket eder.
  */
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Grid, Html, OrbitControls } from "@react-three/drei";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,6 +18,7 @@ import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { readMachineConfig, VIEWER_DEFAULTS, type ViewerConfig } from "@/lib/machine";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
+import { useServerForm } from "@/hooks/useServerForm";
 import { useBot } from "@/store/useBot";
 import type { Device, Point } from "@/lib/types";
 
@@ -35,11 +36,7 @@ export default function Viewer3D() {
   const stored = readMachineConfig(device?.settings);
   // Kaydetmeden önce de sonucu görebilmek için görünüm ayarları yerel durumda
   // tutuluyor; kaydırıcıyı oynatınca sahne anında tepki veriyor.
-  const [viewer, setViewer] = useState<ViewerConfig>(stored.viewer);
-
-  useEffect(() => {
-    if (device) setViewer(readMachineConfig(device.settings).viewer);
-  }, [device?.id, device?.settings]);
+  const [viewer, setViewer] = useServerForm<ViewerConfig>(stored.viewer);
 
   const { data: points } = useQuery({
     queryKey: ["points", deviceId],

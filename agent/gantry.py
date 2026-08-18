@@ -92,8 +92,10 @@ class AxisCalibration:
         self._axes: dict[str, dict[str, Any]] = {
             name: dict(NEUTRAL_AXIS) for name in AXIS_INDEX
         }
-        # Gantry Studio'dan okunan gerçek eksen sınırları (mm)
+        # Gantry Studio'dan okunan gerçek eksen kalibrasyonu
         self._machine: dict[str, dict[str, float]] = {}
+        # Yumuşak sınırlar uygulansın mı? Panelden kapatılabiliyor.
+        self.limits_enabled = True
 
     def set_machine_limits(self, calib: list[dict[str, Any]] | None) -> None:
         """`/api/calib` yanıtını alır (X, Y, Z sırasıyla): cpm, dir, home, min, max."""
@@ -218,10 +220,17 @@ class AxisCalibration:
     def check_limits(self, axis: str, user_mm: float) -> None:
         """Sınır dışıysa anlaşılır bir hata verir.
 
+        Panelden `limits_enabled` kapatıldıysa hiç kontrol yapılmıyor —
+        kalibrasyon sırasında sınırlar henüz doğru değilken gerekiyor.
+
+
         Gantry Studio da kendi sınırlarını uyguluyor ama onun mesajı makine
         birimindeki sayıyı söylüyor; kullanıcı panelde milimetre görüyor.
         Kendi sınırımızı önce kontrol edip anlaşılır mesaj veriyoruz.
         """
+        if not self.limits_enabled:
+            return
+
         low, high = self.effective_limits(axis)
 
         if low is not None and user_mm < low:

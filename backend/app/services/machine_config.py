@@ -192,6 +192,9 @@ def normalize(settings: Any) -> dict[str, Any]:
 
     raw_axes = source.get("axes") if isinstance(source.get("axes"), dict) else {}
     source["axes"] = {name: normalize_axis(raw_axes.get(name)) for name in AXES}
+    # Varsayılan açık: sınırları uygulamak PLC belgesine göre uygulamanın
+    # sorumluluğu, kapalı başlamak sessizce güvensiz olurdu.
+    source["limits_enabled"] = source.get("limits_enabled") is not False
     source["tool_zone"] = normalize_tool_zone(source.get("tool_zone"))
     source["viewer"] = normalize_viewer(source.get("viewer"))
     return source

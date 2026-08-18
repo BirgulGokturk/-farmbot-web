@@ -32,11 +32,13 @@ def upgrade() -> None:
     # server_default: mevcut satırlar NOT NULL kısıtını ihlal etmesin.
     # (SQLite `ALTER COLUMN ... DROP DEFAULT` desteklemediği için varsayılan
     # sütunda kalıyor; modelde de aynı varsayılan var, zararı yok.)
+    # server_default olarak `sa.text("1")` YAZMAYIN: SQLite kabul eder ama
+    # PostgreSQL "column is of type boolean but default expression is of type
+    # integer" deyip göçü düşürür, konteyner da açılışta ölür.
+    # `sa.true()` her iki lehçede de doğru karşılığa çevriliyor.
     op.add_column(
         "sensors",
-        sa.Column(
-            "installed", sa.Boolean(), nullable=False, server_default=sa.text("1")
-        ),
+        sa.Column("installed", sa.Boolean(), nullable=False, server_default=sa.true()),
     )
 
 

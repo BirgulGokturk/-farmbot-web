@@ -25,6 +25,7 @@ import contextlib
 import json
 import logging
 import os
+import shlex
 import sys
 from collections import deque
 from datetime import datetime, timezone
@@ -152,6 +153,25 @@ class CloudClient:
         response.raise_for_status()
         return int(response.json().get("stored", 0))
 
+    async def upload_photo(
+        self, data: bytes, position: tuple[float, float, float] | None = None
+    ) -> dict[str, Any]:
+        """Çekilen kareyi buluta yükler.
+
+        Konumu da gönderiyoruz: fotoğrafın bahçenin neresinde çekildiği,
+        sonradan hangi bitkiye ait olduğunu anlamanın tek yolu.
+        """
+        files = {"file": ("frame.jpg", data, "image/jpeg")}
+        form = {}
+        if position is not None:
+            form = {"x": str(position[0]), "y": str(position[1]), "z": str(position[2])}
+
+        response = await self._http.post(
+            "/api/v1/agent/photo", files=files, data=form, timeout=httpx.Timeout(60.0)
+        )
+        response.raise_for_status()
+        return response.json()
+
     @property
     def websocket_url(self) -> str:
         scheme = "wss" if self.base_url.startswith("https") else "ws"
@@ -165,9 +185,13 @@ class Agent:
         serial_link: SerialLink,
         cloud: CloudClient,
         gantry: GantryClient | None = None,
+        camera_command: list[str] | None = None,
     ) -> None:
         self.serial = serial_link
         self.cloud = cloud
+        # Kamera isteğe bağlı: takılı değilse ajan sensör ve hareket köprüsü
+        # olarak çalışmaya devam eder
+        self.camera_command = camera_command
         # Hareket kontrolü isteğe bağlı: Gantry Studio kurulu değilse ajan
         # yalnızca sensör köprüsü olarak çalışmaya devam eder
         self.gantry = gantry
@@ -376,7 +400,13 @@ class Agent:
         # ajanı yeniden başlatmadan yeni ölçek devreye giriyor.
         if kind == "config":
             if self.gantry is not None:
-                self.gantry.calibration.update((message.get("payload") or {}).get("axes"))
+                payload = message.get("payload") or {}
+                self.gantry.calibration.update(payload.get("axes"))
+                self.gantry.calibration.limits_enabled = payload.get("limits_enabled") is not False
+                if not self.gantry.calibration.limits_enabled:
+                    logger.warning(
+                        "Yumuşak sınırlar KAPALI — hedefler denetlenmeden gönderilecek"
+                    )
             return
 
         if kind != "rpc":
@@ -449,6 +479,10 @@ class Agent:
             await self._apply_motion(kind, args)
             return
 
+        if kind == "take_photo":
+            await self._take_photo()
+            return
+
         if kind == "write_pin":
             pin = int(args.get("pin_number", 0))
             value = int(args.get("pin_value", 0))
@@ -517,6 +551,50 @@ class Agent:
                 axis = "all"
             logger.info("Eve dönülüyor: %s", axis)
             await self.gantry.go_home(axis)
+
+    async def _take_photo(self) -> None:
+        """Kamerayı çeker ve kareyi buluta yükler.
+
+        Neden dış komut çağırıyoruz: Raspberry Pi kamerası `rpicam-still`
+        (eski adıyla `libcamera-still`) ile sürülüyor. Python bağlaması
+        (picamera2) ek bir bağımlılık ve Pi'ye özel; ajanı tek dosya ve üç
+        bağımlılıkla tutmak, kurulumu da sorun gidermeyi de basitleştiriyor.
+
+        Kare diske yazılmıyor: komut çıktıyı doğrudan stdout'a veriyor ve
+        oradan buluta gidiyor. Pi'nin SD kartına yazıp silmek gereksiz aşınma.
+        """
+        if not self.camera_command:
+            raise RuntimeError(
+                "Kamera yapılandırılmamış. Ajanı --camera-cmd ile başlatın "
+                "ya da --no-camera ile bu komutu kapatın."
+            )
+
+        logger.info("Fotoğraf çekiliyor: %s", " ".join(self.camera_command))
+        process = await asyncio.create_subprocess_exec(
+            *self.camera_command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            data, error = await asyncio.wait_for(process.communicate(), timeout=30.0)
+        except asyncio.TimeoutError:
+            process.kill()
+            raise RuntimeError("Kamera 30 saniyede yanıt vermedi") from None
+
+        if process.returncode != 0 or not data:
+            detail = (error or b"").decode("utf-8", "replace").strip()[:200]
+            raise RuntimeError(f"Kamera çekimi başarısız: {detail or 'boş çıktı'}")
+
+        position = None
+        if self.gantry is not None:
+            position = await self.gantry.position()
+
+        result = await self.cloud.upload_photo(data, position)
+        logger.info(
+            "Fotoğraf yüklendi: %d KB%s",
+            len(data) // 1024,
+            f", {result['discarded']} eski kare silindi" if result.get("discarded") else "",
+        )
 
     async def _send_arduino(self, command: str, timeout: float = 5.0) -> dict[str, Any]:
         """Komutu gönderir ve Arduino'nun onayını bekler."""
@@ -596,6 +674,25 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--camera-cmd",
+        default=os.getenv(
+            "FARMBOT_CAMERA_CMD",
+            # Kare stdout'a yazılıyor (`-o -`), diske değil. `-n` önizleme
+            # penceresini kapatıyor: Pi ekrana bağlı olsa da kiosk görüntüsünün
+            # üstüne kamera penceresi açılmasın.
+            "rpicam-still -n -t 400 --width 640 --height 480 -q 80 -o -",
+        ),
+        help=(
+            "Fotoğraf çekme komutu; kareyi stdout'a yazmalı. Eski Pi OS "
+            "sürümlerinde rpicam-still yerine libcamera-still kullanın."
+        ),
+    )
+    parser.add_argument(
+        "--no-camera",
+        action="store_true",
+        help="Kamera yoksa fotoğraf komutunu kapatır.",
+    )
+    parser.add_argument(
         "--no-gantry",
         action="store_true",
         help="Hareket kontrolünü devre dışı bırak; yalnızca sensör köprüsü çalışsın",
@@ -633,7 +730,16 @@ async def main_async(args: argparse.Namespace) -> int:
         "Ajan başlıyor · seri=%s · api=%s · hareket=%s",
         args.port, args.api, "kapalı" if gantry is None else args.gantry,
     )
-    agent = Agent(SerialLink(args.port, args.baud), CloudClient(args.api, args.token), gantry)
+    camera_command = None if args.no_camera else shlex.split(args.camera_cmd)
+    if camera_command:
+        logger.info("Kamera komutu: %s", " ".join(camera_command))
+
+    agent = Agent(
+        SerialLink(args.port, args.baud),
+        CloudClient(args.api, args.token),
+        gantry,
+        camera_command,
+    )
 
     try:
         await agent.run()

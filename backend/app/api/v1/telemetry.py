@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from sqlalchemy import delete, func, select
 
 from app.api.deps import DbSession, OwnedDevice
@@ -95,6 +96,38 @@ async def list_images(
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Fotoğraf dosyası
+# --------------------------------------------------------------------------- #
+
+# Cihaz başına saklanan kare sayısı. Görüntüler veritabanında durduğu için
+# sınırsız büyümemeli; 120 kare ~6 MB ve birkaç günlük geçmişe yetiyor.
+PHOTO_RETENTION = 120
+
+
+@router.get("/images/{image_id}/file")
+async def image_file(image_id: uuid.UUID, device: OwnedDevice, db: DbSession) -> Response:
+    """Karenin kendisini döndürür.
+
+    Görüntü baytları `deferred` olduğu için burada açıkça yükleniyor; liste
+    sorguları onları taşımıyor.
+    """
+    image = await db.get(Image, image_id)
+    if image is None or image.device_id != device.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Fotoğraf bulunamadı")
+
+    data = await db.scalar(select(Image.data).where(Image.id == image_id))
+    if not data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Bu kaydın görüntü verisi yok")
+
+    return Response(
+        content=data,
+        media_type=image.content_type or "image/jpeg",
+        # Kare bir daha değişmiyor; tarayıcı galeriyi her açışta yeniden indirmesin
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
 
