@@ -31,7 +31,13 @@ def istek(yol: str, veri: dict | None = None) -> dict:
     req = urllib.request.Request(url, gonder, {"Content-Type": "application/json"})
     # Hareket bitene kadar bekler
     with urllib.request.urlopen(req, timeout=200) as r:
-        return json.loads(r.read())
+        sonuc = json.loads(r.read())
+
+    # Gantry Studio hatayi HTTP 200 icinde {"ok": false} olarak dondurur.
+    # Kontrol etmezsek red sebebi gizli kalir ve "hicbir sey olmadi" gibi gorunur.
+    if isinstance(sonuc, dict) and sonuc.get("ok") is False:
+        raise RuntimeError(sonuc.get("error") or "komut reddedildi")
+    return sonuc
 
 
 def konumlar() -> list[float]:
@@ -60,7 +66,12 @@ def main() -> int:
         cevap = input(f"[{dizin}] numarali ekseni oynatalim mi? (e/h/q): ").strip().lower()
         if cevap == "q":
             break
+        if cevap == "h":
+            continue
         if cevap != "e":
+            # Yanlislikla yapistirilan komutlar sorulari yutmasin
+            print("   Sadece  e / h / q  yazin. Bu eksen atlandi.")
+            print()
             continue
 
         once = konumlar()
@@ -75,6 +86,16 @@ def main() -> int:
         sonra = konumlar()
         degisim = [round(sonra[i] - once[i], 1) for i in range(3)]
         print(f"   Konum degisimi: {degisim}")
+
+        if all(abs(d) < 0.5 for d in degisim):
+            print("   UYARI: komut kabul edildi ama HICBIR eksen kimildamadi.")
+            print("   Olasi sebepler:")
+            print("     - servo surucusune enerji gitmiyor")
+            print("     - PLC'de uzaktan kontrol izni (enable) kapali")
+            print("     - safe_goto once Z'yi travel_z'ye kaldiriyor ve oraya ulasamiyor")
+            print("     Gantry Studio arayuzunden (localhost:8091) ayni hareketi deneyin.")
+            print()
+            continue
 
         eksen = input("   HANGI fiziksel eksen hareket etti? (x/y/z/hicbiri): ").strip().lower()
         if eksen in ("x", "y", "z"):
