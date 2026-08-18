@@ -1,4 +1,12 @@
-﻿[Unit]
+# DİKKAT: Bu dosya UTF-8 (BOM'suz) ve LF satır sonlarıyla kaydedilmelidir.
+#
+# systemd, dosyanın başındaki BOM yüzünden `[Unit]` satırını bölüm başlığı
+# saymıyor ve altındaki her satır için "Assignment outside of section" deyip
+# yok sayıyor. CRLF ise daha sinsi: değerin sonuna görünmez bir  ekliyor,
+# yani token `fbt_...` olarak okunuyor ve sunucu onu geçersiz sayıyor.
+# Windows'ta düzenlerken editörünüzün bu ikisini bozmadığından emin olun.
+
+[Unit]
 Description=FarmBot köprü ajanı (Arduino -> bulut)
 # Ağ hazır olmadan başlarsa ilk gönderimler tampona düşer; beklemek daha temiz
 After=network-online.target
@@ -9,7 +17,7 @@ Type=simple
 
 # --- DÜZENLEYİN ---
 User=pi
-WorkingDirectory=/home/pi/-farmbot-web/agent
+WorkingDirectory=/home/pi/farmbot-web/agent
 Environment=FARMBOT_SERIAL_PORT=/dev/ttyUSB0
 Environment=FARMBOT_BAUD=9600
 Environment=FARMBOT_GANTRY_URL=http://localhost:8091
@@ -17,7 +25,7 @@ Environment=FARMBOT_API_URL=https://farmbot-api.onrender.com
 Environment=FARMBOT_DEVICE_TOKEN=fbt_BURAYA_TOKEN_YAPISTIRIN
 # ------------------
 
-ExecStart=/home/pi/-farmbot-web/agent/.venv/bin/python farmbot_agent.py
+ExecStart=/home/pi/farmbot-web/agent/.venv/bin/python farmbot_agent.py
 
 # Ajan çökerse ya da Arduino çıkarılırsa kendiliğinden toparlansın
 Restart=always

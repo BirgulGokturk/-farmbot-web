@@ -1,8 +1,6 @@
-# Kabuk betikleri Linux konteynerlerinde çalışır; CRLF satır sonu
-# "bad interpreter" hatası verir. Depoda ve çalışma kopyasında LF zorla.
-*.sh text eol=lf
-Dockerfile text eol=lf
-*.conf text eol=lf
-
-# Diğer metin dosyalarında satır sonunu Git'e bırak
-* text=auto
+# Servis birimleri, kabuk betikleri ve ajan dosyaları Linux'ta çalışıyor.
+# Git'in Windows'ta CRLF'e çevirmesi systemd'de değerlerin sonuna görünmez bir
+# \r bırakıyor (token `fbt_...\r` olarak okunup reddediliyordu). Bu dosyalar
+# her platformda LF kalsın.
+*.service text eol=lf
+*.sh      text eol=lf
