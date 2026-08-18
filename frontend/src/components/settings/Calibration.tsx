@@ -111,13 +111,13 @@ export function Calibration({ device }: { device: Device }) {
             hint={active === "x" ? "X sıfır noktası kaydırması" : "Sıfır noktası kaydırması"}
             onChange={(value) => patch(active, { offset: value })}
           />
-          <NumberField
+          <OptionalNumberField
             name={`min-${active}`}
             label="En küçük konum (mm)"
             value={config.min_mm}
             onChange={(value) => patch(active, { min_mm: value })}
           />
-          <NumberField
+          <OptionalNumberField
             name={`max-${active}`}
             label="En büyük konum (mm)"
             value={config.max_mm}
@@ -156,7 +156,7 @@ export function Calibration({ device }: { device: Device }) {
         <div className="rounded-xl border border-line bg-surface-2 px-3.5 py-3 text-xs">
           <p className="mb-1.5 font-medium text-content">Önizleme</p>
           <ul className="space-y-1 font-mono text-subtle">
-            {[10, 100, config.max_mm].map((mm) => (
+            {[10, 100, config.max_mm ?? 1000].map((mm) => (
               <li key={mm}>
                 {mm} mm → makineye {toMachine(config, mm).toFixed(2)}
               </li>
@@ -273,6 +273,54 @@ function MeasureWizard({
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Boş bırakılabilen sayı alanı — yumuşak sınırlar için.
+ *
+ * Boş = sınır yok. Bunu ayrı bir bileşen yapmamın sebebi: `NumberField` boş
+ * girdiyi yok sayıp eski değeri koruyor; sınırlarda ise boşaltmak anlamlı bir
+ * eylem (sınırı kaldırmak) ve kaydedilmesi gerekiyor.
+ */
+function OptionalNumberField({
+  name,
+  label,
+  value,
+  onChange,
+}: {
+  name: string;
+  label: string;
+  value: number | null;
+  onChange: (value: number | null) => void;
+}) {
+  const [text, setText] = useState(value === null ? "" : String(value));
+
+  useEffect(() => {
+    const incoming = value === null ? "" : String(value);
+    if (text !== incoming && Number(text) !== value) setText(incoming);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  return (
+    <Input
+      name={name}
+      label={label}
+      inputMode="decimal"
+      placeholder="sınır yok"
+      hint={value === null ? "Boş = sınırsız" : undefined}
+      value={text}
+      onChange={(e) => {
+        const next = e.target.value;
+        setText(next);
+        if (next.trim() === "") {
+          onChange(null);
+          return;
+        }
+        const parsed = Number(next);
+        if (Number.isFinite(parsed)) onChange(parsed);
+      }}
+    />
   );
 }
 

@@ -144,6 +144,22 @@ async def create_reading(
     return reading
 
 
+def _real_data_only(device) -> list:
+    """Cihaz gerçek donanıma eşleştirilmişse simülatör ölçümlerini dışarıda bırakır.
+
+    Simülatör, cihaz eşleşmeden önce grafikleri doldurmak için veri üretiyor ve
+    o satırlar veritabanında kalıyor. Arduino bağlandıktan sonra sahte değerler
+    gerçek ölçümlerin arasına karışıp grafikleri ve ısı haritasını okunmaz hâle
+    getiriyordu.
+
+    Eşleşmemiş (hâlâ demo) bir cihazda süzme yapılmıyor — orada gösterilecek
+    tek veri zaten simülatörünki.
+    """
+    if getattr(device, "agent_token_hash", None) is None:
+        return []
+    return [SensorReading.source == "agent"]
+
+
 @router.get("/sensors/{sensor_id}/series", response_model=SensorSeries)
 async def sensor_series(
     sensor_id: uuid.UUID,
@@ -162,6 +178,7 @@ async def sensor_series(
             SensorReading.device_id == device.id,
             SensorReading.sensor_id == sensor_id,
             SensorReading.read_at >= since,
+            *_real_data_only(device),
         )
         .order_by(SensorReading.read_at.desc())
         .limit(limit)
@@ -197,6 +214,7 @@ async def spatial_readings(
         SensorReading.read_at >= since,
         SensorReading.x.is_not(None),
         SensorReading.y.is_not(None),
+        *_real_data_only(device),
     ]
     if sensor_id is not None:
         conditions.append(SensorReading.sensor_id == sensor_id)
@@ -222,6 +240,9 @@ async def clear_readings(
         description="Yalnızca bu andan önceki ölçümleri sil (boşsa hepsi silinir)",
     ),
     sensor_id: uuid.UUID | None = Query(default=None, description="Tek bir sensörle sınırla"),
+    simulated_only: bool = Query(
+        default=False, description="Yalnızca simülatörün ürettiği ölçümleri sil"
+    ),
 ) -> Message:
     """Ölçüm geçmişini temizler.
 
@@ -234,6 +255,8 @@ async def clear_readings(
         conditions.append(SensorReading.read_at < before)
     if sensor_id is not None:
         conditions.append(SensorReading.sensor_id == sensor_id)
+    if simulated_only:
+        conditions.append(SensorReading.source == "simulator")
 
     result = await db.execute(delete(SensorReading).where(*conditions))
     await db.commit()
@@ -251,7 +274,7 @@ async def latest_readings(device: OwnedDevice, db: DbSession) -> list[SensorRead
     for (sensor_id,) in sensors.all():
         row = await db.execute(
             select(SensorReading)
-            .where(SensorReading.sensor_id == sensor_id)
+            .where(SensorReading.sensor_id == sensor_id, *_real_data_only(device))
             .order_by(SensorReading.read_at.desc())
             .limit(1)
         )

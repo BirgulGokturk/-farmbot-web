@@ -111,13 +111,26 @@ export default function Designer() {
     enabled: Boolean(deviceId),
   });
 
-  // İlk sensörü otomatik seç: "tüm sensörler" birimleri karıştırdığı için
-  // (nem %, sıcaklık °C, ışık lux) tek ölçekte anlamsız renk üretiyordu.
-  useEffect(() => {
-    if (!heatSensorId && sensors?.length) setHeatSensorId(sensors[0].id);
-  }, [sensors, heatSensorId]);
+  /**
+   * Isı haritasında yalnızca **toprak nemi** gösteriliyor.
+   *
+   * Diğer sensörler robotun ucunda değil, gövdesinde duruyor: hava sıcaklığı,
+   * basınç, rakım ve yağmur yatağın her noktasında aynı değeri veriyor. Onları
+   * haritaya çizmek "bahçenin şu köşesi kuru" gibi bir bilgi üretmiyor, sadece
+   * ölçüm gürültüsünü renklendiriyordu. Toprak nemi ise robot her noktaya
+   * indiğinde farklı okuyor — haritası anlamlı olan tek ölçüm bu.
+   */
+  const heatmapSensors = useMemo(
+    () => (sensors ?? []).filter((sensor) => sensor.kind === "soil_moisture"),
+    [sensors],
+  );
 
-  const heatSensor = sensors?.find((sensor) => sensor.id === heatSensorId);
+  useEffect(() => {
+    const usable = heatmapSensors.some((sensor) => sensor.id === heatSensorId);
+    if (!usable) setHeatSensorId(heatmapSensors[0]?.id ?? "");
+  }, [heatmapSensors, heatSensorId]);
+
+  const heatSensor = heatmapSensors.find((sensor) => sensor.id === heatSensorId);
 
   const { data: heatReadings } = useQuery({
     queryKey: ["spatial", deviceId, heatSensorId],
@@ -444,21 +457,26 @@ export default function Designer() {
                 onChange={setHeatmapOn}
                 label="Isı haritası"
                 tone="warning"
-                disabled={!sensors?.length}
+                disabled={!heatmapSensors.length}
               />
-              {heatmapOn && (
+              {/* Birden çok toprak nemi sensörü varsa seçim gerekir; tek
+                  sensörde açılır kutu göstermek boş yere yer kaplıyor. */}
+              {heatmapOn && heatmapSensors.length > 1 && (
                 <Select
                   name="heatSensor"
                   value={heatSensorId}
                   onChange={(event) => setHeatSensorId(event.target.value)}
                   className="h-8 w-40 text-xs"
                 >
-                  {(sensors ?? []).map((sensor) => (
+                  {heatmapSensors.map((sensor) => (
                     <option key={sensor.id} value={sensor.id}>
                       {sensor.label} ({sensor.unit || "birimsiz"})
                     </option>
                   ))}
                 </Select>
+              )}
+              {!heatmapSensors.length && (
+                <span className="text-xs text-subtle">Toprak nemi sensörü tanımlı değil</span>
               )}
             </div>
           )}

@@ -17,8 +17,9 @@ export interface AxisConfig {
   offset: number;
   /** Yön ters mi. */
   invert: boolean;
-  min_mm: number;
-  max_mm: number;
+  /** Yumuşak sınırlar. `null` = sınır uygulanmıyor. */
+  min_mm: number | null;
+  max_mm: number | null;
   speed: number;
   accel: number;
 }
@@ -55,8 +56,10 @@ export const AXIS_DEFAULTS: AxisConfig = {
   scale: 1,
   offset: 0,
   invert: false,
-  min_mm: 0,
-  max_mm: 1000,
+  // Boş başlar: kalibrasyon ayarlanmamış bir makinede varsayılan bir limit
+  // her hareketi reddederdi.
+  min_mm: null,
+  max_mm: null,
   speed: 20,
   accel: 100,
 };
@@ -87,6 +90,13 @@ function num(value: unknown, fallback: number): number {
   return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : fallback;
 }
 
+/** Boş bırakılabilen sayı: değer yoksa `null`. */
+function optionalNum(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "string" ? Number(value) : value;
+  return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : null;
+}
+
 function readAxis(raw: unknown): AxisConfig {
   const source = (raw ?? {}) as Partial<Record<keyof AxisConfig, unknown>>;
   const scale = num(source.scale, AXIS_DEFAULTS.scale);
@@ -95,8 +105,8 @@ function readAxis(raw: unknown): AxisConfig {
     scale: scale === 0 ? AXIS_DEFAULTS.scale : scale,
     offset: num(source.offset, AXIS_DEFAULTS.offset),
     invert: Boolean(source.invert),
-    min_mm: num(source.min_mm, AXIS_DEFAULTS.min_mm),
-    max_mm: num(source.max_mm, AXIS_DEFAULTS.max_mm),
+    min_mm: optionalNum(source.min_mm),
+    max_mm: optionalNum(source.max_mm),
     speed: num(source.speed, AXIS_DEFAULTS.speed),
     accel: num(source.accel, AXIS_DEFAULTS.accel),
   };

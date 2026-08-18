@@ -307,6 +307,7 @@ class VirtualRobot:
                         y=self.y,
                         z=self.z,
                         read_at=now,
+                        source="simulator",
                     )
                 )
                 await hub.broadcast(
@@ -364,6 +365,7 @@ class VirtualRobot:
                     y=self.y,
                     z=self.z,
                     read_at=now,
+                    source="simulator",
                 )
             )
             await session.commit()

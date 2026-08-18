@@ -59,8 +59,10 @@ NEUTRAL_AXIS: dict[str, Any] = {
     "scale": 1.0,
     "offset": 0.0,
     "invert": False,
-    "min_mm": 0.0,
-    "max_mm": 1000.0,
+    # None = sınır yok. Varsayılan bir limit koymak, kalibrasyon hiç
+    # ayarlanmamış bir makinede her hareketi reddederdi.
+    "min_mm": None,
+    "max_mm": None,
     "speed": 20.0,
     "accel": 100.0,
 }
@@ -116,11 +118,17 @@ class AxisCalibration:
         Kendi sınırımızı önce kontrol edip anlaşılır mesaj veriyoruz.
         """
         cfg = self.get(axis)
-        low, high = float(cfg["min_mm"]), float(cfg["max_mm"])
-        if not (low <= user_mm <= high):
+        low, high = cfg.get("min_mm"), cfg.get("max_mm")
+
+        if low is not None and user_mm < float(low):
             raise OutOfRange(
                 f"{axis.upper()} ekseni {user_mm:.1f} mm hedefine gidemez; "
-                f"izin verilen aralık {low:.0f} – {high:.0f} mm."
+                f"alt sınır {float(low):.0f} mm."
+            )
+        if high is not None and user_mm > float(high):
+            raise OutOfRange(
+                f"{axis.upper()} ekseni {user_mm:.1f} mm hedefine gidemez; "
+                f"üst sınır {float(high):.0f} mm."
             )
 
     def speed_for(self, axes: list[str], requested: float) -> float:

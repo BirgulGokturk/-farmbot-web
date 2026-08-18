@@ -36,8 +36,14 @@ AXIS_DEFAULTS: dict[str, Any] = {
     "scale": 1.0,      # komut edilen mm başına makineye yazılan birim
     "offset": 0.0,     # sıfır noktası kaydırması (makine birimi)
     "invert": False,   # yön ters mi
-    "min_mm": 0.0,     # yumuşak sınır — kullanıcı biriminde
-    "max_mm": 1000.0,
+    # Yumuşak sınırlar **boş** başlar (None = sınır yok).
+    #
+    # Buraya bir sayı koymak cazip ama tehlikeli: kullanıcı kalibrasyon
+    # sayfasını hiç açmamışken varsayılan bir limit, 4500 mm'lik bir yatakta
+    # her hareketi reddeder. Kural: varsayılan davranış, bu özellik hiç
+    # yokmuş gibi olmalı. Sınırı ancak kullanıcı yazarsa uyguluyoruz.
+    "min_mm": None,
+    "max_mm": None,
     "speed": 20.0,     # eksene özel hız
     "accel": 100.0,    # eksene özel ivme
 }
@@ -74,6 +80,9 @@ _AXIS_RANGE_BOUNDS: dict[str, tuple[float, float]] = {
     "max_mm": (-1e6, 1e6),
 }
 
+# Boş bırakılabilen alanlar: değer yoksa o sınır uygulanmıyor
+_OPTIONAL_AXIS_KEYS = ("min_mm", "max_mm")
+
 
 def _number(
     value: Any,
@@ -107,16 +116,30 @@ def normalize_axis(raw: Any) -> dict[str, Any]:
             span=_AXIS_RANGE_BOUNDS.get(key),
         )
         for key, default in AXIS_DEFAULTS.items()
-        if key != "invert"
+        if key != "invert" and key not in _OPTIONAL_AXIS_KEYS
     }
     axis["invert"] = bool(source.get("invert", AXIS_DEFAULTS["invert"]))
+
+    # Boş/geçersiz sınır = sınır yok. Boş bir metin kutusunu 0'a çevirseydik
+    # kullanıcı farkında olmadan ekseni kilitlerdi.
+    for key in _OPTIONAL_AXIS_KEYS:
+        value = source.get(key)
+        if value is None or value == "":
+            axis[key] = None
+        else:
+            parsed = _number(value, float("nan"), span=_AXIS_RANGE_BOUNDS[key])
+            axis[key] = None if parsed != parsed else parsed
 
     # Ölçek sıfır olursa bölme hatası verir ve eksen tamamen kilitlenir
     if axis["scale"] == 0:
         axis["scale"] = float(AXIS_DEFAULTS["scale"])
 
-    # Sınırlar ters girilmişse düzelt; aksi hâlde her hareket reddedilir
-    if axis["min_mm"] > axis["max_mm"]:
+    # İkisi de verilmiş ama ters girilmişse düzelt; aksi hâlde her hareket reddedilir
+    if (
+        axis["min_mm"] is not None
+        and axis["max_mm"] is not None
+        and axis["min_mm"] > axis["max_mm"]
+    ):
         axis["min_mm"], axis["max_mm"] = axis["max_mm"], axis["min_mm"]
 
     return axis

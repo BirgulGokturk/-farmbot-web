@@ -112,3 +112,13 @@ class SensorReading(TimestampMixin, Base):
     z: Mapped[float | None] = mapped_column(Float)
 
     read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # Ölçümü kim üretti: "agent" (Arduino → Raspberry Pi köprüsü) ya da
+    # "simulator" (sanal robot).
+    #
+    # Neden ayrı bir sütun? Simülatör, cihaz gerçek donanıma eşleştirilmeden
+    # önce grafikleri doldurmak için veri üretiyor. Bu satırlar veritabanında
+    # kalıcı; sonradan gerçek Arduino bağlandığında sahte değerler gerçek
+    # ölçümlerin arasına karışıp grafikleri ve ısı haritasını bozuyordu.
+    # Kaynağı işaretleyip sorgularda süzüyoruz.
+    source: Mapped[str] = mapped_column(String(16), default="agent", nullable=False)

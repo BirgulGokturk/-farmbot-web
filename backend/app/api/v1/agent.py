@@ -186,6 +186,7 @@ async def ingest_readings(
                 y=item.y if item.y is not None else device.last_y,
                 z=item.z if item.z is not None else device.last_z,
                 read_at=item.read_at or now,
+                source="agent",
             )
         )
         stored += 1

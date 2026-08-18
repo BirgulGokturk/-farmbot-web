@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
@@ -50,6 +50,27 @@ export default function Dashboard() {
     queryFn: () => api.hardware.sensors(deviceId!),
     enabled: Boolean(deviceId),
   });
+
+  // Sensör kartları yalnızca WebSocket'ten gelen canlı ölçümlerle besleniyordu.
+  // Sayfa yeni açıldığında henüz mesaj gelmediği için hepsi "—" görünüyordu ve
+  // Arduino susmuşsa hiç dolmuyordu. Sunucudaki son değeri başlangıç olarak
+  // alıyoruz; canlı mesaj gelince üzerine yazıyor.
+  const { data: latest } = useQuery({
+    queryKey: ["latest-readings", deviceId],
+    queryFn: () => api.hardware.latestReadings(deviceId!),
+    enabled: Boolean(deviceId),
+    refetchInterval: 60_000,
+  });
+
+  const latestBySensor = useMemo(() => {
+    const map: Record<string, { value: number; read_at: string }> = {};
+    for (const reading of latest ?? []) {
+      if (reading.sensor_id) {
+        map[reading.sensor_id] = { value: reading.value, read_at: reading.read_at };
+      }
+    }
+    return map;
+  }, [latest]);
 
   const { data: events } = useQuery({
     queryKey: ["events", deviceId, "active"],
@@ -204,7 +225,14 @@ export default function Dashboard() {
           {sensors?.length ? (
             <ul className="space-y-2.5">
               {sensors.map((sensor) => (
-                <SensorRow key={sensor.id} sensorId={sensor.id} label={sensor.label} unit={sensor.unit} icon={sensor.icon} />
+                <SensorRow
+                  key={sensor.id}
+                  sensorId={sensor.id}
+                  label={sensor.label}
+                  unit={sensor.unit}
+                  icon={sensor.icon}
+                  fallback={latestBySensor[sensor.id]}
+                />
               ))}
             </ul>
           ) : (
@@ -365,13 +393,17 @@ function SensorRow({
   label,
   unit,
   icon,
+  fallback,
 }: {
   sensorId: string;
   label: string;
   unit: string;
   icon: string;
+  /** Sunucudaki son kayıtlı ölçüm — canlı mesaj gelene kadar bu gösterilir. */
+  fallback?: { value: number; read_at: string };
 }) {
-  const reading = useBot((s) => s.lastReadings[sensorId]);
+  const live = useBot((s) => s.lastReadings[sensorId]);
+  const reading = live ?? fallback;
 
   return (
     <li className="flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3.5 py-2.5">
