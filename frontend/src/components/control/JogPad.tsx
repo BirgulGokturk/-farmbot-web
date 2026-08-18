@@ -31,32 +31,6 @@ export function JogPad({ deviceId, speed }: JogPadProps) {
   const [step, setStep] = useState<number>(100);
   const [pending, setPending] = useState<string | null>(null);
   const locked = useBot((s) => s.status?.locked ?? false);
-  const position = useBot((s) => s.status?.position);
-  const limits = useBot((s) => s.status?.informational?.axis_limits) as
-    | Record<string, [number, number]>
-    | undefined;
-
-  /**
-   * Bu adım eksen sınırının dışına çıkar mı?
-   *
-   * Robot sınırdayken düğmeye basmak eskiden sessizce başarısız oluyordu:
-   * komut PLC'ye kadar gidiyor, orada reddediliyor ve kullanıcı hiçbir şey
-   * görmüyordu. Artık düğme baştan kilitleniyor ve sebebini yazıyor.
-   */
-  function blockedReason(axis: "x" | "y" | "z", direction: 1 | -1): string | null {
-    const range = limits?.[axis];
-    if (!range || !position) return null;
-
-    const [low, high] = range;
-    const target = position[axis] + step * direction;
-    if (target < low) {
-      return `${axis.toUpperCase()} ekseni en fazla ${Math.round(low)} mm'ye kadar inebilir`;
-    }
-    if (target > high) {
-      return `${axis.toUpperCase()} ekseni en fazla ${Math.round(high)} mm'ye kadar çıkabilir`;
-    }
-    return null;
-  }
 
   async function jog(axis: "x" | "y" | "z", direction: 1 | -1, key: string) {
     if (!deviceId) return;
@@ -84,18 +58,6 @@ export function JogPad({ deviceId, speed }: JogPadProps) {
   }
 
   const disabled = !deviceId || locked;
-
-  /** Yön düğmesinin ortak özelliklerini üretir (sınır kontrolü dahil). */
-  function axisButton(axis: "x" | "y" | "z", direction: 1 | -1, key: string, label: string) {
-    const blocked = blockedReason(axis, direction);
-    return {
-      label: blocked ?? label,
-      blocked: Boolean(blocked),
-      disabled: disabled || Boolean(blocked),
-      loading: pending === key,
-      onClick: () => jog(axis, direction, key),
-    };
-  }
 
   return (
     <div className="space-y-5">
@@ -125,14 +87,20 @@ export function JogPad({ deviceId, speed }: JogPadProps) {
         <div className="grid grid-cols-3 grid-rows-3 gap-2">
           <div />
           <JogButton
-            {...axisButton("y", 1, "y+", "Y ekseninde ileri")}
+            label="Y ekseninde ileri"
+            disabled={disabled}
+            loading={pending === "y+"}
+            onClick={() => jog("y", 1, "y+")}
           >
             <ArrowUp className="size-6" />
           </JogButton>
           <div />
 
           <JogButton
-            {...axisButton("x", -1, "x-", "X ekseninde sola")}
+            label="X ekseninde sola"
+            disabled={disabled}
+            loading={pending === "x-"}
+            onClick={() => jog("x", -1, "x-")}
           >
             <ArrowLeft className="size-6" />
           </JogButton>
@@ -148,14 +116,20 @@ export function JogPad({ deviceId, speed }: JogPadProps) {
           </JogButton>
 
           <JogButton
-            {...axisButton("x", 1, "x+", "X ekseninde sağa")}
+            label="X ekseninde sağa"
+            disabled={disabled}
+            loading={pending === "x+"}
+            onClick={() => jog("x", 1, "x+")}
           >
             <ArrowRight className="size-6" />
           </JogButton>
 
           <div />
           <JogButton
-            {...axisButton("y", -1, "y-", "Y ekseninde geri")}
+            label="Y ekseninde geri"
+            disabled={disabled}
+            loading={pending === "y-"}
+            onClick={() => jog("y", -1, "y-")}
           >
             <ArrowDown className="size-6" />
           </JogButton>
@@ -166,7 +140,10 @@ export function JogPad({ deviceId, speed }: JogPadProps) {
         <div className="flex flex-col items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-subtle">Z</span>
           <JogButton
-            {...axisButton("z", 1, "z+", "Z ekseninde yukarı")}
+            label="Z ekseninde yukarı"
+            disabled={disabled}
+            loading={pending === "z+"}
+            onClick={() => jog("z", 1, "z+")}
           >
             <ArrowUpToLine className="size-6" />
           </JogButton>
@@ -180,23 +157,15 @@ export function JogPad({ deviceId, speed }: JogPadProps) {
             <Home className="size-5" />
           </JogButton>
           <JogButton
-            {...axisButton("z", -1, "z-", "Z ekseninde aşağı")}
+            label="Z ekseninde aşağı"
+            disabled={disabled}
+            loading={pending === "z-"}
+            onClick={() => jog("z", -1, "z-")}
           >
             <ArrowDownToLine className="size-6" />
           </JogButton>
         </div>
       </div>
-
-      {!locked && limits && position && (
-        <p className="text-center text-xs text-subtle">
-          Eksen sınırları:{" "}
-          {(["x", "y", "z"] as const)
-            .filter((axis) => limits[axis])
-            .map((axis) => `${axis.toUpperCase()} ${Math.round(limits[axis][0])}–${Math.round(limits[axis][1])}`)
-            .join(" · ") || "tanımsız"}{" "}
-          mm · <span className="text-danger">kırmızı düğme</span> sınıra ulaşıldığını gösterir
-        </p>
-      )}
 
       {locked && (
         <p className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-center text-sm text-warning">
@@ -213,7 +182,6 @@ function JogButton({
   onClick,
   disabled,
   loading,
-  blocked,
   variant = "default",
 }: {
   children: React.ReactNode;
@@ -221,8 +189,6 @@ function JogButton({
   onClick: () => void;
   disabled?: boolean;
   loading?: boolean;
-  /** Eksen sınırı yüzünden engellendi — kırmızı göster, sebebi başlıkta yaz */
-  blocked?: boolean;
   variant?: "default" | "home";
 }) {
   return (
@@ -235,11 +201,9 @@ function JogButton({
         // Dokunmatikte rahat basılabilecek boyut
         "grid size-[4.5rem] place-items-center rounded-2xl transition-soft",
         "active:scale-95 disabled:cursor-not-allowed disabled:opacity-40",
-        blocked
-          ? "border border-danger/40 bg-danger/10 text-danger opacity-100"
-          : variant === "home"
-            ? "border border-line bg-surface-2 text-muted hover:text-brand"
-            : "bg-gradient-surface border border-line text-content shadow-soft hover:border-brand/40 hover:text-brand",
+        variant === "home"
+          ? "border border-line bg-surface-2 text-muted hover:text-brand"
+          : "bg-gradient-surface border border-line text-content shadow-soft hover:border-brand/40 hover:text-brand",
       )}
     >
       {loading ? <Loader2 className="size-5 animate-spin text-brand" /> : children}
