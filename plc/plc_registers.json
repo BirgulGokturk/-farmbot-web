@@ -1,0 +1,85 @@
+{
+  "_comment": "Canonical PLC address map for the farm gantry. Both Gantry Studio and the Manuel Kontrol app should load THIS file rather than each hardcoding its own addresses. Modbus-TCP holding registers. 32-bit values occupy two consecutive words, LOW WORD FIRST, IEEE-754 float32.",
+
+  "connection": {
+    "ip": "192.168.1.88",
+    "port": 502,
+    "unit_id": 1,
+    "move_mode": "absolute"
+  },
+
+  "global": {
+    "enable": 1010
+  },
+
+  "_layout_warning": "X DOES NOT USE THE SAME STRIDE AS Y AND Z. Y is based at 1030 and Z at 1050, both with offsets +0 jogf, +1 jogb, +2 go, +3 home, +4 target, +6 vel, +8 accel, +10 decel, +12 pos. X is based at 1020 but only its jog/go/home/target/pos live there, and its pos sits at +6 where Y and Z keep vel. X's vel/accel/decel were relocated down to 1000-1007. Assuming a uniform stride for X puts its decel write onto 1030/1031, which are Y jog forward and Y jog backward.",
+
+  "axes": [
+    {
+      "name": "X",
+      "plc_axis": "Axis_1",
+      "jogf": 1020,
+      "jogb": 1021,
+      "go": 1022,
+      "home": 1023,
+      "target": 1024,
+      "pos": 1026,
+      "vel": 1006,
+      "accel": 1000,
+      "decel": 1002,
+      "_note": "irregular: vel/accel/decel are down at 1000-1007, pos is at base+6"
+    },
+    {
+      "name": "Y",
+      "plc_axis": "Axis_2",
+      "jogf": 1030,
+      "jogb": 1031,
+      "go": 1032,
+      "home": 1033,
+      "target": 1034,
+      "vel": 1036,
+      "accel": 1038,
+      "decel": 1040,
+      "pos": 1042
+    },
+    {
+      "name": "Z",
+      "plc_axis": "Axis_3",
+      "jogf": 1050,
+      "jogb": 1051,
+      "go": 1052,
+      "home": 1053,
+      "target": 1054,
+      "vel": 1056,
+      "accel": 1058,
+      "decel": 1060,
+      "pos": 1062
+    }
+  ],
+
+  "wide_fields": ["target", "vel", "accel", "decel", "pos"],
+
+  "unmapped": {
+    "_comment": "0 means not wired yet; the app treats it as a harmless no-op",
+    "presence_reg": 0,
+    "z_safe_reg": 0,
+    "lock_reg": 0
+  },
+
+  "reserved": {
+    "_comment": "Do not allocate anything here without re-running plc_map.py check",
+    "1004-1005": "gap in the X parameter block",
+    "1008-1009": "gap before the global enable",
+    "1011-1019": "gap before the X command block",
+    "1028-1029": "gap between X pos and Y jogf - the buffer that keeps a stride mistake from being worse",
+    "1044-1049": "gap between Y and Z",
+    "1064+": "free"
+  },
+
+  "conventions": {
+    "pulsed": ["go", "home"],
+    "pulse_note": "write 1, wait ~0.2 s, write 0",
+    "target_units": "PLC counts, not mm - convert with counts-per-mm from gantry_calib.json",
+    "float_word_order": "low word at the base address, high word at base+1"
+  }
+}

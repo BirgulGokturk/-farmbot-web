@@ -69,12 +69,68 @@ NEUTRAL_AXIS: dict[str, Any] = {
 
 
 class AxisCalibration:
-    """Üç eksenin ölçek/kaydırma/yön ve sınır ayarlarını tutar."""
+    """Üç eksenin ölçek/kaydırma/yön ve sınır ayarlarını tutar.
+
+    İki ayrı sınır kaynağı var ve ikisi de gerekli:
+
+    * **Makine sınırları** — Gantry Studio'nun `gantry_calib.json` dosyasından,
+      `/api/calib` ile okunuyor. PLC belgesindeki ifade net: *"Soft limits must
+      be enforced in the app before every move. The PLC will not stop you."*
+      Yani bu sınırların dışına çıkmak fiziksel çarpma demek; pazarlık konusu
+      değil.
+    * **Kullanıcı sınırları** — panelden girilen değerler. Bunlar yalnızca
+      **daraltabilir**, genişletemez. Kullanıcı 5000 mm yazsa bile makine 425'te
+      duruyorsa 425 geçerli olur.
+
+    Kullanıcı sınırı için varsayılan koymuyoruz (bkz. NEUTRAL_AXIS): panelde
+    hiçbir şey ayarlanmamışken bile makine sınırları yürürlükte olduğu için
+    koruma zaten var.
+    """
 
     def __init__(self) -> None:
         self._axes: dict[str, dict[str, Any]] = {
             name: dict(NEUTRAL_AXIS) for name in AXIS_INDEX
         }
+        # Gantry Studio'dan okunan gerçek eksen sınırları (mm)
+        self._machine: dict[str, dict[str, float]] = {}
+
+    def set_machine_limits(self, calib: list[dict[str, Any]] | None) -> None:
+        """`/api/calib` yanıtındaki min/max değerlerini alır (X, Y, Z sırasıyla)."""
+        if not isinstance(calib, list):
+            return
+        limits: dict[str, dict[str, float]] = {}
+        for name, index in AXIS_INDEX.items():
+            if index >= len(calib) or not isinstance(calib[index], dict):
+                continue
+            entry = calib[index]
+            try:
+                limits[name] = {"min": float(entry["min"]), "max": float(entry["max"])}
+            except (KeyError, TypeError, ValueError):
+                continue
+        if not limits:
+            return
+        self._machine = limits
+        logger.info(
+            "Makine sınırları okundu — %s",
+            ", ".join(
+                f"{n.upper()} {limits[n]['min']:.0f}–{limits[n]['max']:.0f} mm"
+                for n in ("x", "y", "z")
+                if n in limits
+            ),
+        )
+
+    def effective_limits(self, axis: str) -> tuple[float | None, float | None]:
+        """Makine ve kullanıcı sınırlarının kesişimi — en dar olan geçerli."""
+        cfg = self.get(axis)
+        machine = self._machine.get(axis)
+
+        lows = [v for v in (cfg.get("min_mm"), machine and machine["min"]) if v is not None]
+        highs = [v for v in (cfg.get("max_mm"), machine and machine["max"]) if v is not None]
+
+        return (
+            max(float(v) for v in lows) if lows else None,
+            min(float(v) for v in highs) if highs else None,
+        )
 
     def update(self, axes: dict[str, Any] | None) -> None:
         if not isinstance(axes, dict):
@@ -117,18 +173,17 @@ class AxisCalibration:
         birimindeki sayıyı söylüyor; kullanıcı panelde milimetre görüyor.
         Kendi sınırımızı önce kontrol edip anlaşılır mesaj veriyoruz.
         """
-        cfg = self.get(axis)
-        low, high = cfg.get("min_mm"), cfg.get("max_mm")
+        low, high = self.effective_limits(axis)
 
-        if low is not None and user_mm < float(low):
+        if low is not None and user_mm < low:
             raise OutOfRange(
                 f"{axis.upper()} ekseni {user_mm:.1f} mm hedefine gidemez; "
-                f"alt sınır {float(low):.0f} mm."
+                f"alt sınır {low:.0f} mm."
             )
-        if high is not None and user_mm > float(high):
+        if high is not None and user_mm > high:
             raise OutOfRange(
                 f"{axis.upper()} ekseni {user_mm:.1f} mm hedefine gidemez; "
-                f"üst sınır {float(high):.0f} mm."
+                f"üst sınır {high:.0f} mm."
             )
 
     def speed_for(self, axes: list[str], requested: float) -> float:
@@ -218,6 +273,27 @@ class GantryClient:
         """Ham makine konumu — kalibrasyon sihirbazı bunu kullanıyor."""
         data = await self.status()
         return None if data is None else extract_position(data)
+
+    async def refresh_machine_limits(self) -> bool:
+        """Eksen sınırlarını Gantry Studio'nun kalibrasyonundan tazeler.
+
+        PLC belgesindeki kural: yumuşak sınırları uygulamak **uygulamanın**
+        işi, PLC durdurmuyor. Bu yüzden sınırları tahmin etmiyor, makinenin
+        kendi kalibrasyon dosyasından okuyoruz. Ulaşılamazsa sessizce geçiyoruz;
+        hareket zaten Gantry Studio ayakta değilken yapılamıyor.
+        """
+        try:
+            response = await self._http.get("/api/calib", timeout=self._status_timeout)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            logger.warning("Eksen sınırları okunamadı (%s)", exc)
+            return False
+
+        # Gantry Studio yanıtı {"calib": [...]} sarmalıyla döndürüyor
+        calib = data.get("calib") if isinstance(data, dict) else data
+        self.calibration.set_machine_limits(calib)
+        return True
 
     # ------------------------------------------------------------------ #
     # Komutlar

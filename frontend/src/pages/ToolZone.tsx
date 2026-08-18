@@ -56,17 +56,35 @@ export default function ToolZone() {
 
   const goto = useMutation({
     mutationFn: async (slot: ToolSlot) => {
-      // Önce güvenli yüksekliğe çık, sonra yuvanın üstüne git, sonra in.
-      // Tek `move-absolute` de aynı rotayı izliyor ama iki adım hem panelde
-      // hem günlükte ne olduğunu okunur kılıyor.
-      await api.control.moveAbsolute(device!.id, {
-        x: slot.x,
-        y: slot.y,
-        z: zone.safe_z,
-      });
-      await api.control.moveAbsolute(device!.id, { x: slot.x, y: slot.y, z: slot.z });
+      /*
+       * Uç yuvasına yaklaşma — PLC belgesindeki (PLC_BRIEF.md §7) sıraya birebir
+       * uyar. Kural şu: **uç kafası hiçbir zaman ucun üstüne dikey inemez.**
+       * Kafa uca yandan, yalnızca Y ekseni boyunca kayarak giriyor.
+       *
+       * X/Y hareketi her zaman güvenli yükseklikte yapılmalı; yatay hareketle
+       * Z inişini birleştirmek, aradaki sıralı uçları süpürüp devirir — belgeye
+       * göre bu daha önce defalarca yaşanmış.
+       *
+       * Adımlar ayrı komutlar olarak gidiyor; tek bir birleşik hareket, güvenli
+       * rotayı Gantry Studio'nun insafına bırakırdı.
+       */
+      const id = device!.id;
+      const approachY = slot.y - zone.approach_mm;
+
+      // ① Yalnızca Z: güvenli yüksekliğe çık
+      await api.control.moveAbsolute(id, { x: position.x, y: position.y, z: zone.safe_z });
+      // ② Yalnızca X/Y: yaklaşma noktasına git, hâlâ güvenli yükseklikte
+      await api.control.moveAbsolute(id, { x: slot.x, y: approachY, z: zone.safe_z });
+      // ③ Yalnızca Z: ucun yanında aşağı in
+      await api.control.moveAbsolute(id, { x: slot.x, y: approachY, z: slot.z });
+      // ④ Yalnızca Y: ucun altına kay (X ve Z sabit)
+      await api.control.moveAbsolute(id, { x: slot.x, y: slot.y, z: slot.z });
     },
-    onSuccess: () => toast.info("Yuvaya gidiliyor"),
+    onSuccess: () =>
+      toast.info(
+        "Uca yaklaşıldı",
+        "Kilitleme servosu PLC'de henüz bağlı değil; ucu takma adımı elle yapılmalı",
+      ),
     onError: (error) => toast.error("Gidilemedi", (error as Error).message),
   });
 
@@ -162,12 +180,29 @@ export default function ToolZone() {
             />
             <Input
               name="approach"
-              label="Yaklaşma payı"
+              label="Y yaklaşma payı"
               inputMode="decimal"
-              hint="Yuvaya yatayda yaklaşırken bırakılan boşluk"
+              hint="Uca hangi taraftan girileceği: artı değer küçük Y'den, eksi değer büyük Y'den yaklaşır"
               value={String(zone.approach_mm)}
               onChange={(e) => setZone({ ...zone, approach_mm: Number(e.target.value) || 0 })}
             />
+          </div>
+
+          {/* Sıra ekranda yazılı olsun: bu bir tercih değil, PLC belgesindeki
+              güvenlik kuralı. Uç kafası ucun üstüne dikey inemiyor. */}
+          <div className="mt-4 rounded-xl border border-warning/30 bg-warning/10 px-3.5 py-3">
+            <p className="mb-1.5 text-xs font-semibold text-warning">Yaklaşma sırası</p>
+            <ol className="list-inside list-decimal space-y-0.5 text-xs text-muted">
+              <li>Z güvenli yüksekliğe çıkar</li>
+              <li>X/Y yaklaşma noktasına gider (hâlâ yukarıda)</li>
+              <li>Z ucun <em>yanında</em> aşağı iner</li>
+              <li>Y boyunca ucun altına kayar</li>
+            </ol>
+            <p className="mt-2 text-xs text-subtle">
+              Kafa ucun üstüne dikey inemez; yatay hareketle inişi birleştirmek aradaki
+              uçları devirir. Kilitleme servosu PLC'de henüz bağlı olmadığı için son
+              takma adımı elle yapılmalı.
+            </p>
           </div>
 
           <div className="mt-4 rounded-xl border border-line bg-surface-2 px-3.5 py-3">

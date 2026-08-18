@@ -624,6 +624,10 @@ async def main_async(args: argparse.Namespace) -> int:
             )
         else:
             logger.info("Hareket kontrolü bağlandı: %s", args.gantry)
+            # Yumuşak sınırları makinenin kendi kalibrasyonundan al. PLC
+            # belgesine göre sınırları uygulamak uygulamanın işi; PLC
+            # durdurmuyor, sınır aşımı fiziksel çarpma demek.
+            await gantry.refresh_machine_limits()
 
     logger.info(
         "Ajan başlıyor · seri=%s · api=%s · hareket=%s",
