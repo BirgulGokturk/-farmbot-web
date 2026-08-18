@@ -24,10 +24,10 @@ from typing import Any
 
 import httpx
 
+from axes import AxisConfig
+
 logger = logging.getLogger("farmbot-agent.gantry")
 
-# Eksen sırası Gantry Studio ile aynı: 0=X, 1=Y, 2=Z
-AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
 # Gantry Studio hareket komutlarında HTTP yanıtını **hareket bitene kadar**
 # tutuyor: `movexyz` içeride `safe_goto` çalıştırıyor (Z kaldır → yatayda git →
@@ -49,8 +49,11 @@ class GantryClient:
         password: str = "",
         status_timeout: float = 5.0,
         command_timeout: float = COMMAND_TIMEOUT_SECONDS,
+        axes: AxisConfig | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        # Panel ekseni <-> makine ekseni eslemesi (gantry_axes.json)
+        self.axes = axes or AxisConfig.load()
         self._status_timeout = status_timeout
         self._command_timeout = command_timeout
 
@@ -93,12 +96,28 @@ class GantryClient:
         self._was_reachable = True
         return data
 
-    async def position(self) -> tuple[float, float, float] | None:
-        """Anlık X/Y/Z konumu (mm). Okunamazsa None."""
+    async def calib(self) -> list[dict] | None:
+        """Gantry Studio'nun eksen kalibrasyonu (cpm, dir, home, min, max).
+
+        Yumuşak limitler buradan geliyor; panel jog düğmelerini bu değerlere
+        göre kilitliyor.
+        """
+        try:
+            response = await self._http.get("/api/calib", timeout=self._status_timeout)
+            response.raise_for_status()
+            return response.json().get("calib")
+        except Exception:
+            return None
+
+    async def position(self) -> dict[str, float] | None:
+        """Anlık konum, PANEL eksenlerine çevrilmiş olarak (mm)."""
         data = await self.status()
         if data is None:
             return None
-        return extract_position(data)
+        raw = extract_position(data)
+        if raw is None:
+            return None
+        return self.axes.from_gantry(list(raw))
 
     # ------------------------------------------------------------------ #
     # Komutlar
@@ -138,8 +157,14 @@ class GantryClient:
         return result
 
     async def move_xyz(self, x: float, y: float, z: float, speed: float = 20.0) -> None:
-        """Güvenli rotayla hedefe git (Z kaldır → yatayda git → indir)."""
-        await self.command({"cmd": "movexyz", "target": [x, y, z], "speed": speed})
+        """Güvenli rotayla hedefe git (Z kaldır → yatayda git → indir).
+
+        Koordinatlar PANEL eksenlerinde verilir; burada makinenin sırasına
+        çevrilir. Panelde X'e basınca fiziksel Z'nin hareket etmesinin sebebi
+        bu çevrimin eksik olmasıydı.
+        """
+        target = self.axes.to_gantry_target(x, y, z)
+        await self.command({"cmd": "movexyz", "target": target, "speed": speed})
 
     async def go_home(self, axis: str = "all") -> None:
         """Eve dön.
@@ -147,22 +172,30 @@ class GantryClient:
         `all` için sıralama Z → X → Y. Önce Z'yi yukarı almazsak alet toprakta
         sürünerek yatay harekete başlar.
         """
-        order = [2, 0, 1] if axis == "all" else [AXIS_INDEX[axis]]
+        # Z önce yukarı: panel Z'sinin makinedeki karşılığını kullanıyoruz
+        order = (
+            [self.axes.gantry_index("z"), self.axes.gantry_index("x"), self.axes.gantry_index("y")]
+            if axis == "all"
+            else [self.axes.gantry_index(axis)]
+        )
         for index in order:
             await self.command({"cmd": "gohome", "axis": index})
 
     async def jog(self, axis: str, forward: bool, value: bool) -> None:
+        # Yön ters tanımlıysa ileri/geri komutunu da çeviriyoruz
+        if self.axes.invert.get(axis):
+            forward = not forward
         await self.command(
             {
                 "cmd": "jogf" if forward else "jogb",
-                "axis": AXIS_INDEX[axis],
+                "axis": self.axes.gantry_index(axis),
                 "value": 1 if value else 0,
             }
         )
 
     async def move_axis(self, axis: str, millimetres: float, speed: float = 20.0) -> None:
         await self.command(
-            {"cmd": "movej", "axis": AXIS_INDEX[axis], "value": millimetres, "speed": speed}
+            {"cmd": "movej", "axis": self.axes.gantry_index(axis), "value": millimetres, "speed": speed}
         )
 
     async def emergency_stop(self) -> None:
@@ -197,16 +230,26 @@ def extract_position(status: dict[str, Any]) -> tuple[float, float, float] | Non
     return values[0], values[1], values[2]
 
 
-def to_status_tree(status: dict[str, Any]) -> dict[str, Any]:
+def to_status_tree(
+    status: dict[str, Any],
+    axes_config: AxisConfig | None = None,
+    calib: list[dict] | None = None,
+) -> dict[str, Any]:
     """Gantry Studio yanıtını panelin beklediği durum ağacına çevirir.
 
     Panel FarmBot'un durum ağacı biçimini bekliyor; böylece 3D görünüm, tarla
     tasarımcısı ve manuel kontrol ekranları hiç değişmeden gerçek veriyle çalışır.
+
+    Eksen sırası da burada panel eksenlerine çevriliyor — makinedeki 1. eksen
+    panelin X'i olmak zorunda değil.
     """
-    position = extract_position(status) or (0.0, 0.0, 0.0)
+    config = axes_config or AxisConfig()
+    raw = extract_position(status) or (0.0, 0.0, 0.0)
+    position = config.from_gantry(list(raw))
     axes = status.get("axes") or []
 
-    def axis_state(index: int) -> str:
+    def axis_state(panel_axis: str) -> str:
+        index = config.gantry_index(panel_axis)
         if index >= len(axes) or not isinstance(axes[index], dict):
             return "unknown"
         axis = axes[index]
@@ -218,24 +261,21 @@ def to_status_tree(status: dict[str, Any]) -> dict[str, Any]:
     # `en` = PLC'deki etkinleştirme register'ı. 0 ise sürücüler kilitli.
     enabled = bool(axes[0].get("en")) if axes and isinstance(axes[0], dict) else False
     running_program = bool(status.get("prog"))
+    states = {axis: axis_state(axis) for axis in ("x", "y", "z")}
 
     return {
         "location_data": {
-            "position": {"x": position[0], "y": position[1], "z": position[2]},
-            "axis_states": {
-                "x": axis_state(0),
-                "y": axis_state(1),
-                "z": axis_state(2),
-            },
+            "position": position,
+            "axis_states": states,
         },
         "informational_settings": {
             "sync_status": "synced" if status.get("ok") else "sync_error",
             "locked": not enabled,
-            "busy": running_program or any(
-                axis_state(i) == "moving" for i in range(3)
-            ),
+            "busy": running_program or any(state == "moving" for state in states.values()),
             "firmware_version": "gantry-studio",
-            # Panelde alet durumunu göstermek için
             "current_tool": status.get("current_tool"),
+            # Panel jog düğmelerini bu limitlere göre kilitliyor; kullanıcı
+            # sınır dışına çıkan bir komutu göndermeden önce uyarı görüyor
+            "axis_limits": config.limits_for(calib),
         },
     }

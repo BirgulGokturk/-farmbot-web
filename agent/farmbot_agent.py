@@ -331,6 +331,8 @@ class Agent:
 
         last_signature: str | None = None
         last_sent = 0.0
+        calib: list[dict] | None = None
+        calib_refreshed = 0.0
 
         while True:
             await asyncio.sleep(GANTRY_POLL_SECONDS)
@@ -339,7 +341,15 @@ class Agent:
             if status is None:
                 continue
 
-            tree = to_status_tree(status)
+            # Kalibrasyon (eksen limitleri) nadiren değişir; dakikada bir yeter
+            now_mono = asyncio.get_running_loop().time()
+            if calib is None or (now_mono - calib_refreshed) > 60.0:
+                fresh = await self.gantry.calib()
+                if fresh is not None:
+                    calib = fresh
+                calib_refreshed = now_mono
+
+            tree = to_status_tree(status, self.gantry.axes, calib)
             position = tree["location_data"]["position"]
             # Konumu 0.1 mm çözünürlükte imzala: gürültüden dolayı sürekli
             # mesaj gitmesin
@@ -489,9 +499,9 @@ class Agent:
             current = await self.gantry.position()
             if current is None:
                 raise RuntimeError("Mevcut konum okunamadı; göreli hareket yapılamıyor")
-            x = current[0] + float(args.get("x", 0) or 0)
-            y = current[1] + float(args.get("y", 0) or 0)
-            z = current[2] + float(args.get("z", 0) or 0)
+            x = current["x"] + float(args.get("x", 0) or 0)
+            y = current["y"] + float(args.get("y", 0) or 0)
+            z = current["z"] + float(args.get("z", 0) or 0)
             logger.info("Göreli hareket → X %.1f · Y %.1f · Z %.1f", x, y, z)
             await self.gantry.move_xyz(x, y, z, speed)
 
