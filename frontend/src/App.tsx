@@ -5,12 +5,17 @@ import { AppShell } from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/primitives";
 import { useAuth } from "@/store/useAuth";
 
-import Dashboard from "@/pages/Dashboard";
-import ManualControl from "@/pages/ManualControl";
-import Designer from "@/pages/Designer";
+// Giriş yapılmamışken gösterilen tek sayfa; paketten ayrılması anlamsız.
 import Login from "@/pages/Login";
 
+// Oturum açıldıktan sonraki açılış sayfası: bilerek eager tutuluyor, aksi
+// halde her açılışta panel yerine bir an spinner görünürdü. Kiosk ekranında
+// bu geri adım olur.
+import Dashboard from "@/pages/Dashboard";
+
 // Ağır sayfalar ilk yüklemede indirilmesin
+const ManualControl = lazy(() => import("@/pages/ManualControl"));
+const Designer = lazy(() => import("@/pages/Designer"));
 const Viewer3D = lazy(() => import("@/pages/Viewer3D"));
 const Sensors = lazy(() => import("@/pages/Sensors"));
 const CameraPage = lazy(() => import("@/pages/CameraPage"));

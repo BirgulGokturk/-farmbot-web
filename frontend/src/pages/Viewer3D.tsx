@@ -101,11 +101,19 @@ export default function Viewer3D() {
               <Canvas
                 shadows
                 camera={{
-                  // Makineyi ekrana sığdıracak mesafe, en uzun kenardan
-                  // türetiliyor. `zoom` bunu ölçekliyor — küçük değer
-                  // yakınlaştırıyor.
+                  /*
+                   * Kamera, **başlangıç noktası (X0/Y0) ön solda** kalacak
+                   * köşeden bakıyor.
+                   *
+                   * Önceki açı +X/+Z köşesindendi ve sıfır noktası sağa
+                   * düşüyordu; panelde X sola doğru büyüyor gibi görünüyordu,
+                   * makinede ise sıfır solda. Bu köşeden bakınca ekrandaki
+                   * sağ yön dünya +X ile aynı hizaya geliyor.
+                   *
+                   * Mesafe en uzun kenardan türetiliyor; `zoom` onu ölçekliyor.
+                   */
                   position: [
-                    travel.x / 2 + Math.max(travel.x, travel.y) * 1.1 * viewer.zoom,
+                    travel.x / 2 - Math.max(travel.x, travel.y) * 1.1 * viewer.zoom,
                     (LEG_HEIGHT + travel.z + 0.6) * viewer.zoom,
                     travel.y + Math.max(travel.x, travel.y) * 1.1 * viewer.zoom,
                   ],
@@ -297,6 +305,13 @@ function Slider({
 const PROFILE = 0.02;
 /** Tezgâh ayak yüksekliği (m). */
 const LEG_HEIGHT = 0.62;
+/**
+ * X rayının yataktan taşan uzantısı (m).
+ *
+ * Ray yatağın dışına çıkıyor ve elektrik panosu bu uzantının altına asılı
+ * duruyor. Uzantı kısa kalınca pano yatağın kenarına yapışık görünüyordu.
+ */
+const RAIL_OVERHANG = 0.18;
 
 const ALUMINIUM = { color: "#c9ced6", metalness: 0.85, roughness: 0.32 } as const;
 const DARK_PART = { color: "#2a2f38", metalness: 0.5, roughness: 0.55 } as const;
@@ -838,9 +853,9 @@ function Scene({
           Önce iki rayın tam ortasına konmuştu: hiçbirine değmiyor, havada
           duruyordu. Kutu raydan aşağı sarkar, üstüne binmez. */}
       <ControlEnclosure
-        x={-PROFILE * 4.5}
-        y={benchHeight - PROFILE * 2.5}
-        z={-PROFILE * 2.5}
+        x={-RAIL_OVERHANG * 0.55}
+        y={benchHeight - PROFILE * 4}
+        z={length / 2}
       />
 
       {/* Bekleyen uçların askısı — kabın uzak ucunda, toprağın üstünde durur.
@@ -943,16 +958,16 @@ function RobotRig({
       {[0, length].map((z) => (
         <Extrusion
           key={z}
-          size={[width + PROFILE * 6, PROFILE, PROFILE * 2]}
-          position={[width / 2 - PROFILE * 3, benchHeight + PROFILE, z]}
+          size={[width + RAIL_OVERHANG, PROFILE, PROFILE * 2]}
+          position={[width / 2 - RAIL_OVERHANG / 2, benchHeight + PROFILE, z]}
         />
       ))}
-      {/* Kutuyu ön raya bağlayan askı */}
+      {/* Panoyu uzantıya bağlayan askı — iki ray arasına köprü kuruyor */}
       <mesh
-        position={[-PROFILE * 4.5, benchHeight + PROFILE * 0.5, -PROFILE * 0.6]}
+        position={[-RAIL_OVERHANG * 0.55, benchHeight + PROFILE * 0.4, length / 2]}
         castShadow
       >
-        <boxGeometry args={[PROFILE * 3, PROFILE * 1.6, PROFILE * 0.5]} />
+        <boxGeometry args={[PROFILE * 2, PROFILE * 1.2, length]} />
         <meshStandardMaterial {...DARK_PART} />
       </mesh>
 
