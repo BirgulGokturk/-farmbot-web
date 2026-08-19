@@ -148,21 +148,24 @@ export default function Viewer3D() {
   const tool = (status?.informational?.current_tool as string | undefined) ?? null;
 
   /**
-   * Makinenin gerçek strok ölçüleri (m).
+   * Yatak ölçüleri (m) — **tarla tasarımcısıyla aynı kaynak**.
    *
-   * Önce kalibrasyondaki `max_mm` değerlerine bakıyoruz; sahadaki makine
-   * X 425 · Y 450 · Z 550 mm. "Çalışma alanı" ayarı bahçenin ekilebilir
-   * ölçüsü, robotun gidebildiği mesafe değil — 3B gövdeyi ondan türetmek
-   * oranları bozuyordu. Kalibrasyon boşsa yatak ölçüsüne düşüyoruz.
+   * Bir süre kalibrasyondaki `max_mm` değerlerinden türetiliyordu; tasarımcı
+   * ise `bed_width_mm`/`bed_length_mm` kullanıyor. İkisi farklı olduğunda aynı
+   * bitki iki görünümde farklı yerlerde çıkıyordu. Alan tek yerden gelmeli:
+   * yatak ölçüsü. `max_mm` yalnızca yumuşak sınır, çizim ölçüsü değil.
+   *
+   * Kurulum sihirbazının ilk adımı zaten buraya gerçek strok uzunluğunu
+   * yazdırıyor, dolayısıyla ikisi ayrışmıyor.
    */
-  const travel = useMemo(() => {
-    const axes = stored.axes;
-    return {
-      x: (axes.x.max_mm ?? device?.bed_width_mm ?? 1000) * MM,
-      y: (axes.y.max_mm ?? device?.bed_length_mm ?? 1000) * MM,
-      z: (axes.z.max_mm ?? device?.max_z_mm ?? 400) * MM,
-    };
-  }, [stored.axes, device?.bed_width_mm, device?.bed_length_mm, device?.max_z_mm]);
+  const travel = useMemo(
+    () => ({
+      x: (device?.bed_width_mm ?? 1000) * MM,
+      y: (device?.bed_length_mm ?? 1000) * MM,
+      z: (stored.axes.z.max_mm ?? device?.max_z_mm ?? 400) * MM,
+    }),
+    [device?.bed_width_mm, device?.bed_length_mm, device?.max_z_mm, stored.axes.z.max_mm],
+  );
 
   return (
     <div className="space-y-5">
@@ -809,14 +812,15 @@ function Scene({
   /**
    * Y milimetresini sahne derinliğine çevirir.
    *
-   * Makinenin **Y sıfırı uzak rayda**: panelde varsayılan açıdan bakınca
-   * başlangıç noktası solda kalıyor, gerçek makinedeki gibi. Doğrudan
-   * `y * MM` kullanmak sıfırı yakın raya, yani ekranın sağına düşürüyordu.
+   * Doğrudan `y * MM` — **aynalama yok**. Bir ara Y sıfırını uzak raya
+   * eşlemiştim ki başlangıç noktası ekranda solda kalsın; ama tasarımcı
+   * aynalamadığı için aynı bitki iki görünümde ters uçlarda çıkıyordu.
    *
-   * Hem araba hem bitkiler bu eşlemeyi kullanmak zorunda; biri ham değeri
-   * kullansaydı robot ile bitkiler ters uçlarda görünürdü.
+   * Sıfırın ekranda nerede duracağı artık bakış açısı seçiciyle çözülüyor
+   * (Önden / Sağdan / Arkadan / Soldan). Koordinatı bükmek yerine kameranın
+   * yerini değiştirmek doğru olan: veri her iki görünümde de aynı kalıyor.
    */
-  const yToScene = useCallback((mm: number) => length - mm * MM, [length]);
+  const yToScene = useCallback((mm: number) => mm * MM, []);
 
   const plants = useMemo(
     () => points.filter((p) => p.point_type === "plant" && p.species),
@@ -1101,14 +1105,18 @@ function RobotRig({
 /**
  * Prosedürel bitki: filizden meyveye.
  *
- * Neden tür başına çizim yok: katalog büyüdükçe her yeni sebze için model
+ * Neden tür başına hazır model yok: katalog büyüdükçe her yeni sebze için model
  * hazırlamak gerekirdi. Burada gövde, yapraklar ve meyveler olgunluk oranıyla
  * ölçekleniyor; renk türün kendi renginden geliyor. Yeni bir tür eklendiğinde
  * hiçbir şey yapmadan çalışıyor.
  *
+ * Biçimler kasıtlı olarak basit ama **doğru**: yapraklar küre değil, düzleştirilip
+ * eğilmiş yüzeyler; gövde aşağı doğru kalınlaşan bir koni; meyveler saptan sarkıyor.
+ * Önceki sürümde her şey küreydi ve bitkiden çok köpük yığınına benziyordu.
+ *
  * Aşamalar:
- *   0.00 – 0.15  toprakta tohum, henüz görünür bir şey yok
- *   0.15 – 0.55  filiz: kısa gövde, açılan yapraklar
+ *   0.00 – 0.12  toprakta tohum, yalnızca ekim noktası görünür
+ *   0.12 – 0.55  filiz: kısa gövde, açılan yapraklar
  *   0.55 – 1.00  meyvelenme: yapraklar tam boy, meyveler belirip büyüyor
  */
 function Plant3D({
@@ -1130,83 +1138,125 @@ function Plant3D({
   fontScale: number;
   showLabel: boolean;
 }) {
-  const sprouted = Math.max(0, (progress - 0.12) / 0.88);
-  const height = radius * (0.4 + sprouted * 1.6);
-  const leafSize = radius * (0.25 + sprouted * 0.75);
+  const grown = Math.max(0, (progress - 0.12) / 0.88);
+  const height = radius * (0.35 + grown * 1.5);
+  const leafSpan = radius * (0.3 + grown * 0.8);
 
   // Meyveler olgunluğun ikinci yarısında beliriyor
   const fruiting = Math.max(0, (progress - 0.55) / 0.45);
-  const fruitRadius = radius * 0.3 * fruiting;
+  const fruitR = radius * 0.26 * fruiting;
 
-  const leaves = useMemo(
-    () => [0, 1, 2, 3, 4].map((i) => (i / 5) * Math.PI * 2),
-    [],
-  );
+  /**
+   * Yaprak yerleşimi altın açıyla dağıtılıyor (137.5°).
+   *
+   * Eşit aralıklı yerleştirmek bitkiyi simetrik ve yapay gösteriyor; gerçek
+   * bitkilerde yapraklar bu açıyla diziliyor ve üst üste binmiyor. Sabit bir
+   * diziden üretiliyor, her karede yeniden hesaplanmıyor.
+   */
+  const leaves = useMemo(() => {
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    return Array.from({ length: 7 }, (_, i) => ({
+      angle: i * golden,
+      // Alttaki yapraklar daha büyük ve daha yatık
+      t: i / 6,
+    }));
+  }, []);
+
+  const fruits = useMemo(() => {
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    return Array.from({ length: 3 }, (_, i) => i * golden + 0.9);
+  }, []);
 
   return (
     <group position={[x, base, z]}>
       {/* Ekim noktası — bitki görünmeden önce de yerini belli etsin */}
       <mesh position={[0, 0.001, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[radius * 0.35, 20]} />
-        <meshStandardMaterial color="#4a3728" roughness={1} />
+        <circleGeometry args={[radius * 0.3, 20]} />
+        <meshStandardMaterial color="#3d2a1a" roughness={1} />
       </mesh>
 
       {/* Yayılma halkası */}
       <mesh position={[0, 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[radius * 0.92, radius, 40]} />
-        <meshBasicMaterial color={species.color} transparent opacity={0.35} />
+        <ringGeometry args={[radius * 0.94, radius, 40]} />
+        <meshBasicMaterial color={species.color} transparent opacity={0.3} />
       </mesh>
 
       {progress > 0.12 && (
         <>
-          {/* Gövde */}
+          {/* Gövde — aşağı doğru kalınlaşan koni */}
           <mesh position={[0, height / 2, 0]} castShadow>
-            <cylinderGeometry args={[radius * 0.05, radius * 0.07, height, 8]} />
-            <meshStandardMaterial color="#3f7d3a" roughness={0.8} />
+            <cylinderGeometry args={[radius * 0.035, radius * 0.07, height, 7]} />
+            <meshStandardMaterial color="#4a7c3f" roughness={0.85} />
           </mesh>
 
-          {/* Yapraklar — gövdenin çevresine dağılmış */}
-          {leaves.map((angle, index) => {
-            const tilt = 0.5 + (index % 2) * 0.25;
+          {/* Yapraklar — düzleştirilmiş ve dışa eğilmiş yüzeyler */}
+          {leaves.map((leaf, index) => {
+            const scale = 1 - leaf.t * 0.45;
+            const tilt = 0.75 + leaf.t * 0.5;
+            const y = height * (0.25 + leaf.t * 0.6);
+            const size = leafSpan * scale;
+
             return (
-              <mesh
-                key={index}
-                position={[
-                  Math.cos(angle) * leafSize * 0.7,
-                  height * (0.55 + (index % 3) * 0.12),
-                  Math.sin(angle) * leafSize * 0.7,
-                ]}
-                rotation={[tilt, angle, 0]}
-                castShadow
-              >
-                <sphereGeometry args={[leafSize * 0.55, 10, 6]} />
-                <meshStandardMaterial color={species.color} roughness={0.75} flatShading />
-              </mesh>
+              <group key={index} position={[0, y, 0]} rotation={[0, leaf.angle, 0]}>
+                <mesh
+                  position={[size * 0.55, 0, 0]}
+                  rotation={[0, 0, -tilt]}
+                  scale={[1, 0.18, 0.62]}
+                  castShadow
+                >
+                  <sphereGeometry args={[size * 0.62, 12, 8]} />
+                  <meshStandardMaterial
+                    color={species.color}
+                    roughness={0.7}
+                    metalness={0.02}
+                  />
+                </mesh>
+                {/* Yaprak sapı */}
+                <mesh
+                  position={[size * 0.2, 0, 0]}
+                  rotation={[0, 0, -tilt]}
+                  castShadow
+                >
+                  <cylinderGeometry args={[radius * 0.012, radius * 0.012, size * 0.5, 5]} />
+                  <meshStandardMaterial color="#4a7c3f" roughness={0.9} />
+                </mesh>
+              </group>
             );
           })}
 
-          {/* Meyveler */}
-          {fruiting > 0.02 &&
-            leaves.slice(0, 3).map((angle, index) => (
-              <mesh
-                key={`f-${index}`}
-                position={[
-                  Math.cos(angle + 0.6) * leafSize * 0.5,
-                  height * 0.45,
-                  Math.sin(angle + 0.6) * leafSize * 0.5,
-                ]}
-                castShadow
-              >
-                <sphereGeometry args={[fruitRadius, 14, 10]} />
-                <meshStandardMaterial color={species.color} roughness={0.45} metalness={0.05} />
-              </mesh>
-            ))}
+          {/* Meyveler — saptan sarkıyor */}
+          {fruiting > 0.05 &&
+            fruits.map((angle, index) => {
+              const r = leafSpan * 0.42;
+              const px = Math.cos(angle) * r;
+              const pz = Math.sin(angle) * r;
+              const py = height * 0.52;
+
+              return (
+                <group key={`f-${index}`} position={[px, py, pz]}>
+                  {/* Sap */}
+                  <mesh position={[0, fruitR * 0.9, 0]} castShadow>
+                    <cylinderGeometry args={[radius * 0.01, radius * 0.01, fruitR * 1.2, 5]} />
+                    <meshStandardMaterial color="#4a7c3f" roughness={0.9} />
+                  </mesh>
+                  {/* Meyve — hafif basık küre, gerçek meyveler tam yuvarlak değil */}
+                  <mesh scale={[1, 0.88, 1]} castShadow>
+                    <sphereGeometry args={[fruitR, 16, 12]} />
+                    <meshStandardMaterial
+                      color={species.color}
+                      roughness={0.35}
+                      metalness={0.04}
+                    />
+                  </mesh>
+                </group>
+              );
+            })}
         </>
       )}
 
       {showLabel && (
         <Html
-          position={[0, height + radius * 0.5, 0]}
+          position={[0, height + radius * 0.45, 0]}
           center
           distanceFactor={2.5 * fontScale}
           className="pointer-events-none select-none whitespace-nowrap rounded bg-black/65 px-1.5 py-0.5 text-[10px] text-white"
