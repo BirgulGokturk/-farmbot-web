@@ -563,33 +563,6 @@ function DragChain({
   );
 }
 
-/** Elektronik kutusu ve ondan çıkan kablo demeti. */
-function ControlBox({ x, y, z }: { x: number; y: number; z: number }) {
-  return (
-    <group position={[x, y, z]}>
-      <mesh castShadow>
-        <boxGeometry args={[PROFILE * 5, PROFILE * 7, PROFILE * 2.4]} />
-        <meshStandardMaterial color="#d5d9de" metalness={0.35} roughness={0.45} />
-      </mesh>
-      {/* Kapak çizgisi */}
-      <mesh position={[0, 0, PROFILE * 1.25]}>
-        <boxGeometry args={[PROFILE * 4.4, PROFILE * 6.2, PROFILE * 0.1]} />
-        <meshStandardMaterial color="#aeb4bd" metalness={0.4} roughness={0.4} />
-      </mesh>
-      {/* Durum ledi */}
-      <mesh position={[PROFILE * 1.6, PROFILE * 2.6, PROFILE * 1.35]}>
-        <cylinderGeometry args={[PROFILE * 0.2, PROFILE * 0.2, PROFILE * 0.15, 10]} />
-        <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={0.8} />
-      </mesh>
-      {/* Alttan çıkan kablo demeti */}
-      <mesh position={[0, -PROFILE * 4.5, 0]} castShadow>
-        <cylinderGeometry args={[PROFILE * 0.35, PROFILE * 0.35, PROFILE * 3, 8]} />
-        <meshStandardMaterial color="#15181d" roughness={0.85} />
-      </mesh>
-    </group>
-  );
-}
-
 /** Uç yuvası — bekleyen aletlerin durduğu küçük askı. */
 function ToolRack({ x, y, z }: { x: number; y: number; z: number }) {
   const tools = ["#3b82f6", "#f59e0b", "#22c55e"];
@@ -859,13 +832,6 @@ function Scene({
         to={width}
         y={benchHeight + PROFILE * 2.6}
         z={-PROFILE}
-      />
-
-      {/* Elektronik kutusu bir ayağın üzerinde */}
-      <ControlBox
-        x={-PROFILE * 2.5}
-        y={benchHeight * 0.62}
-        z={length * 0.22}
       />
 
       {/* Elektrik kutusu — X uzantısının ucunda, **ön raya asılı**.
