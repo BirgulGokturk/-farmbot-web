@@ -513,7 +513,25 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
                       strokeWidth={3 / view.scale}
                     />
                   )}
-                  <circle r={Math.max(10, 9 / view.scale)} fill={color} />
+                  {/*
+                    Merkez rozeti bitkinin aşamasını gösteriyor: tohum evresinde
+                    sade nokta, filizlenince 🌱, olgunlaşınca türün kendi emojisi.
+                    Emoji seçmemizin sebebi tür başına çizim gerektirmemesi —
+                    kataloğa yeni bir sebze eklendiğinde kendiliğinden doğru
+                    görünüyor.
+                  */}
+                  {point.species && growth.present && growth.maturity >= 0.15 ? (
+                    <text
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={Math.max(22, radius * 0.9)}
+                      className="pointer-events-none select-none"
+                    >
+                      {growth.maturity >= 0.55 ? point.species.icon : "🌱"}
+                    </text>
+                  ) : (
+                    <circle r={Math.max(10, 9 / view.scale)} fill={color} />
+                  )}
                   {view.scale > 0.12 && (
                     <text
                       y={radius + 34 / view.scale}
