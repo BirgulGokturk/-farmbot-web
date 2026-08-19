@@ -31,6 +31,8 @@ class DeviceState:
         self.pins: dict[str, dict[str, Any]] = {}
         self.informational: dict[str, Any] = {}
         self.last_seen_at: datetime | None = None
+        # Ham PLC register değerleri ve yol gecikmesi — tanılama ekranı için
+        self.diagnostics: dict[str, Any] = {}
 
     def apply_status_tree(self, tree: dict[str, Any]) -> None:
         """Robotun yayınladığı durum ağacını bu nesneye uygula."""
@@ -49,6 +51,10 @@ class DeviceState:
         pins = tree.get("pins")
         if isinstance(pins, dict):
             self.pins = {str(k): v for k, v in pins.items()}
+
+        diagnostics = tree.get("diagnostics")
+        if isinstance(diagnostics, dict):
+            self.diagnostics = diagnostics
 
         info = tree.get("informational_settings") or {}
         if info:
@@ -72,6 +78,7 @@ class DeviceState:
             "pins": self.pins,
             "informational": self.informational,
             "last_seen_at": self.last_seen_at.isoformat() if self.last_seen_at else None,
+            "diagnostics": self.diagnostics,
         }
 
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import logging
+from time import perf_counter
 from typing import Any
 
 import httpx
@@ -60,7 +61,10 @@ NEUTRAL_AXIS: dict[str, Any] = {
     # koymak, kalibrasyon hiç ayarlanmamış bir makinede yanlış davranış
     # üretirdi; boş bırakmak `/api/calib`'den geleni yürürlükte tutuyor.
     "cpm": None,
-    "dir": 1,
+    # `dir` de boş başlamak zorunda. Varsayılan olarak 1 yazılmıştı ve bu değer
+    # "doğru" olduğu için makinenin kendi yönünü hiç kullanmıyordu: Z'de makine
+    # -1 diyorken panel 1 dayatıyor, eksen ters yönde gösteriliyordu.
+    "dir": None,
     "home_mm": None,
     "min_mm": None,
     "max_mm": None,
@@ -155,6 +159,15 @@ class AxisCalibration:
             self.mm_from_raw("z", raw[2]),
         )
 
+    def machine_snapshot(self) -> dict[str, dict[str, float]]:
+        """Makinenin kendi kalibrasyonu — panelde referans olarak gösteriliyor.
+
+        Panel bir alanı boş bıraktığında hangi değerin geçerli olduğunu
+        görebilsin diye taşınıyor; yoksa kullanıcı "boş" yazınca ne olacağını
+        tahmin etmek zorunda kalıyor.
+        """
+        return dict(self._machine)
+
     def effective_limits(self, axis: str) -> tuple[float | None, float | None]:
         """Makine ve kullanıcı sınırlarının kesişimi — en dar olan geçerli."""
         cfg = self.get(axis)
@@ -213,7 +226,7 @@ class AxisCalibration:
 
         return {
             "cpm": pick("cpm", "cpm", 1.0) or 1.0,
-            "dir": float(user.get("dir") or machine.get("dir") or 1),
+            "dir": pick("dir", "dir", 1.0) or 1.0,
             "home": pick("home_mm", "home", 0.0),
         }
 
@@ -284,6 +297,8 @@ class GantryClient:
         self._was_reachable: bool | None = None
         # Panelden gelen eksen kalibrasyonu; bulut bağlanınca dolduruluyor
         self.calibration = AxisCalibration()
+        # Son durum okumasının gidiş-dönüş süresi (ms)
+        self.last_latency_ms: float | None = None
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -298,6 +313,7 @@ class GantryClient:
         Yoklama döngüsünde çağrıldığı için sessiz başarısızlık doğru davranış:
         Gantry Studio kapalıyken sensör akışı etkilenmemeli.
         """
+        started = perf_counter()
         try:
             response = await self._http.get("/api/status", timeout=self._status_timeout)
             response.raise_for_status()
@@ -311,6 +327,9 @@ class GantryClient:
         if self._was_reachable is False:
             logger.info("Gantry Studio yeniden bağlandı")
         self._was_reachable = True
+        # Gidiş-dönüş süresi tanılama ekranında gösteriliyor: PLC yolunun
+        # yavaşlaması, hareketin neden geciktiğini anlamanın en hızlı yolu.
+        self.last_latency_ms = (perf_counter() - started) * 1000.0
         return data
 
     async def position(self) -> tuple[float, float, float] | None:
@@ -544,7 +563,9 @@ def extract_position(status: dict[str, Any]) -> tuple[float, float, float] | Non
 
 
 def to_status_tree(
-    status: dict[str, Any], calibration: "AxisCalibration | None" = None
+    status: dict[str, Any],
+    calibration: "AxisCalibration | None" = None,
+    latency_ms: float | None = None,
 ) -> dict[str, Any]:
     """Gantry Studio yanıtını panelin beklediği durum ağacına çevirir.
 
@@ -570,7 +591,33 @@ def to_status_tree(
     enabled = bool(axes[0].get("en")) if axes and isinstance(axes[0], dict) else False
     running_program = bool(status.get("prog"))
 
+    # Ham register değerleri tanılama ekranına olduğu gibi taşınıyor.
+    # Otomasyon tarafında sorun ararken milimetre değil, PLC'nin gerçekte ne
+    # tuttuğu önemli: enable biti, jog bitleri, hız/ivme ve ham konum.
+    raw_axes = []
+    for index in range(3):
+        entry = axes[index] if index < len(axes) and isinstance(axes[index], dict) else {}
+        raw_axes.append(
+            {
+                "en": entry.get("en"),
+                "jf": entry.get("jf"),
+                "jb": entry.get("jb"),
+                "vel": entry.get("vel"),
+                "accel": entry.get("accel"),
+                "decel": entry.get("decel"),
+                "pos": entry.get("pos"),
+                "err": entry.get("err"),
+                "off": bool(entry.get("off")),
+            }
+        )
+
     return {
+        "diagnostics": {
+            "axes_raw": raw_axes,
+            "machine_calib": calibration.machine_snapshot() if calibration else {},
+            "gantry_latency_ms": latency_ms,
+            "presence": status.get("presence"),
+        },
         "location_data": {
             "position": {"x": position[0], "y": position[1], "z": position[2]},
             "axis_states": {

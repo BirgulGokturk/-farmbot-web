@@ -154,12 +154,28 @@ export function Calibration({ device }: { device: Device }) {
                   </td>
 
                   <td className="px-2 py-2.5">
+                    {/* Üç durumlu: makineden / + / −.
+                        İki durumlu olduğunda panel her zaman bir yön dayatıyordu
+                        ve makinenin kendi yönünü (Z'de −1) hiç kullanamıyorduk. */}
                     <button
-                      onClick={() => patch(axis, { dir: config.dir === 1 ? -1 : 1 })}
-                      aria-label={`${axis.toUpperCase()} yönünü çevir`}
-                      className="h-9 w-12 rounded-lg border border-line bg-surface-2 text-base font-semibold text-content transition-soft hover:border-brand/40 hover:text-brand"
+                      onClick={() =>
+                        patch(axis, {
+                          dir: config.dir === null ? 1 : config.dir === 1 ? -1 : null,
+                        })
+                      }
+                      aria-label={`${axis.toUpperCase()} yönü`}
+                      title={
+                        config.dir === null
+                          ? "Makinenin kendi yönü kullanılıyor"
+                          : "Panelden dayatılan yön"
+                      }
+                      className={
+                        config.dir === null
+                          ? "h-9 w-20 rounded-lg border border-line bg-surface-2 text-[0.7rem] text-subtle transition-soft hover:text-brand"
+                          : "h-9 w-20 rounded-lg border border-brand/40 bg-brand/10 text-base font-semibold text-content transition-soft"
+                      }
                     >
-                      {config.dir === 1 ? "+" : "−"}
+                      {config.dir === null ? "makineden" : config.dir === 1 ? "+" : "−"}
                     </button>
                   </td>
 

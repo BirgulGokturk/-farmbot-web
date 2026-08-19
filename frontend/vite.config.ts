@@ -26,7 +26,19 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    sourcemap: false,
+    /*
+     * Kaynak haritaları açık.
+     *
+     * Kapalıyken üretimde performans kaydı almak işe yaramıyordu: profildeki
+     * fonksiyon adları `C`, `Cl`, `xh` gibi geliyor ve hangi three.js sınıfının
+     * pahalı olduğu anlaşılmıyor. Lighthouse de "Large JavaScript file is
+     * missing a source map" uyarısı veriyordu.
+     *
+     * Maliyeti yok: `.map` dosyaları yalnızca geliştirici araçları açıkken
+     * indiriliyor, normal ziyaretçi hiç istemiyor. Gizlilik açısından da bir
+     * kaybı yok — depo zaten herkese açık.
+     */
+    sourcemap: true,
     // Parçalama elle yapılmıyor: three ve recharts zaten yalnızca lazy
     // sayfalardan (Viewer3D, Sensors) çağrıldığı için paketleyici bunları
     // kendiliğinden ayrı chunk'a alıyor.

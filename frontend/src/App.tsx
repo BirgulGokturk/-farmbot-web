@@ -25,6 +25,7 @@ const Plants = lazy(() => import("@/pages/Plants"));
 const Curves = lazy(() => import("@/pages/Curves"));
 const Schedule = lazy(() => import("@/pages/Schedule"));
 const Logs = lazy(() => import("@/pages/Logs"));
+const Diagnostics = lazy(() => import("@/pages/Diagnostics"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const Setup = lazy(() => import("@/pages/Setup"));
 
@@ -77,6 +78,7 @@ export default function App() {
           <Route path="curves" element={<Curves />} />
           <Route path="schedule" element={<Schedule />} />
           <Route path="logs" element={<Logs />} />
+          <Route path="diagnostics" element={<Diagnostics />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="setup" element={<Setup />} />
         </Route>

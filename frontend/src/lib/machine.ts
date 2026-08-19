@@ -13,8 +13,8 @@ export type AxisName = (typeof AXES)[number];
 export interface AxisConfig {
   /** counts/mm — makinenin bir milimetre için saydığı puls. null = makineninki. */
   cpm: number | null;
-  /** Yön: +1 ya da -1. */
-  dir: 1 | -1;
+  /** Yön: +1 / -1. `null` = makinenin kendi yönü geçerli. */
+  dir: 1 | -1 | null;
   /** Sıfır noktasının mm karşılığı. null = makineninki. */
   home_mm: number | null;
   /** Yumuşak sınırlar. null = makinenin kendi sınırı geçerli. */
@@ -60,7 +60,7 @@ export const AXIS_DEFAULTS: AxisConfig = {
   // Boş alanlar "makineninkini kullan" demek; varsayılan bir sayı koymak
   // kalibre edilmemiş bir eksende yanlış davranış üretirdi.
   cpm: null,
-  dir: 1,
+  dir: null,
   home_mm: null,
   min_mm: null,
   max_mm: null,
@@ -106,7 +106,12 @@ function readAxis(raw: unknown): AxisConfig {
   const source = (raw ?? {}) as Partial<Record<keyof AxisConfig, unknown>>;
   return {
     cpm: optionalNum(source.cpm),
-    dir: num(source.dir, 1) < 0 ? -1 : 1,
+    dir:
+      source.dir === null || source.dir === undefined || source.dir === ""
+        ? null
+        : num(source.dir, 1) < 0
+          ? -1
+          : 1,
     home_mm: optionalNum(source.home_mm),
     min_mm: optionalNum(source.min_mm),
     max_mm: optionalNum(source.max_mm),
@@ -176,5 +181,5 @@ export function cpmFromMeasurement(
 /** Ham count değerini milimetreye çevirir (PLC_BRIEF.md §5). */
 export function mmFromRaw(axis: AxisConfig, raw: number): number {
   const cpm = axis.cpm ?? 1;
-  return (axis.dir * raw) / (cpm || 1) + (axis.home_mm ?? 0);
+  return ((axis.dir ?? 1) * raw) / (cpm || 1) + (axis.home_mm ?? 0);
 }

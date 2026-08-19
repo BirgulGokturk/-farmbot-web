@@ -17,6 +17,7 @@ import {
   ScrollText,
   Settings,
   Workflow,
+  Activity,
   Rocket,
   Wrench,
   type LucideIcon,
@@ -131,6 +132,12 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Sistem",
     items: [
+      {
+        path: "/diagnostics",
+        label: "Tanılama",
+        icon: Activity,
+        description: "Sinyal zinciri ve ham PLC register değerleri",
+      },
       {
         path: "/logs",
         label: "Kayıtlar",

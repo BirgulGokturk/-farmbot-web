@@ -36,7 +36,7 @@ AXIS_DEFAULTS: dict[str, Any] = {
     # Makinenin kendi terimleri. Gantry Studio'nun `gantry_calib.json` dosyası
     # ve PLC_BRIEF.md §5 ile aynı alan adları — iki taraf aynı dili konuşsun.
     "cpm": None,       # counts/mm; None = makineninkini kullan
-    "dir": 1,          # +1 ya da -1
+    "dir": None,       # +1 / -1; None = makineninkini kullan
     "home_mm": None,   # sıfır noktasının mm karşılığı
     "min_mm": None,    # yumuşak sınırlar; None = makineninki geçerli
     "max_mm": None,
@@ -78,7 +78,7 @@ _AXIS_RANGE_BOUNDS: dict[str, tuple[float, float]] = {
 }
 
 # Boş bırakılabilen alanlar: değer yoksa o sınır uygulanmıyor
-_OPTIONAL_AXIS_KEYS = ("cpm", "home_mm", "min_mm", "max_mm")
+_OPTIONAL_AXIS_KEYS = ("cpm", "dir", "home_mm", "min_mm", "max_mm")
 
 
 def _number(
@@ -113,10 +113,8 @@ def normalize_axis(raw: Any) -> dict[str, Any]:
             span=_AXIS_RANGE_BOUNDS.get(key),
         )
         for key, default in AXIS_DEFAULTS.items()
-        if key != "dir" and key not in _OPTIONAL_AXIS_KEYS
+        if key not in _OPTIONAL_AXIS_KEYS
     }
-    # Yön yalnızca +1 ya da -1 olabilir; arada bir değer motoru şaşırtır
-    axis["dir"] = -1 if _number(source.get("dir", 1), 1.0) < 0 else 1
 
     # Boş/geçersiz sınır = sınır yok. Boş bir metin kutusunu 0'a çevirseydik
     # kullanıcı farkında olmadan ekseni kilitlerdi.
@@ -124,6 +122,9 @@ def normalize_axis(raw: Any) -> dict[str, Any]:
         value = source.get(key)
         if value is None or value == "":
             axis[key] = None
+        elif key == "dir":
+            # Yön yalnızca +1 ya da -1 olabilir; arada bir değer motoru şaşırtır
+            axis[key] = -1 if _number(value, 1.0) < 0 else 1
         else:
             parsed = _number(
                 value,

@@ -363,7 +363,9 @@ class Agent:
             if status is None:
                 continue
 
-            tree = to_status_tree(status, self.gantry.calibration)
+            tree = to_status_tree(
+                status, self.gantry.calibration, self.gantry.last_latency_ms
+            )
             position = tree["location_data"]["position"]
             # Konumu 0.1 mm çözünürlükte imzala: gürültüden dolayı sürekli
             # mesaj gitmesin

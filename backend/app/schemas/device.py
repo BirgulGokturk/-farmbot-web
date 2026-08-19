@@ -92,4 +92,6 @@ class DeviceStatusRead(BaseModel):
     axis_states: dict[str, str]
     pins: dict[str, Any]
     informational: dict[str, Any]
+    # Ham PLC register değerleri ve yol gecikmesi
+    diagnostics: dict[str, Any] = {}
     last_seen_at: datetime | None

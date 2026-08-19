@@ -104,6 +104,16 @@ export interface DeviceStatus {
     disk_usage?: number;
     [key: string]: unknown;
   };
+  /** Ham PLC register değerleri ve yol gecikmesi — tanılama ekranı kullanır. */
+  diagnostics?: {
+    axes_raw?: {
+      en?: number | null; jf?: number | null; jb?: number | null;
+      vel?: number | null; accel?: number | null; decel?: number | null;
+      pos?: number | null; err?: string | null; off?: boolean;
+    }[];
+    gantry_latency_ms?: number | null;
+    presence?: boolean | null;
+  };
   last_seen_at: string | null;
 }
 
