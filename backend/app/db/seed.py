@@ -46,6 +46,39 @@ SPECIES: list[tuple[str, str, str, str, int, int, int, int, SunRequirement]] = [
     ("turp",      "Turp",      "🌰", "#fda4af",  80,  8,  28, 140, SunRequirement.PARTIAL),
     ("fesleğen",  "Fesleğen",  "🌱", "#65a30d", 200,  5,  50, 200, SunRequirement.PARTIAL),
     ("nane",      "Nane",      "🍃", "#10b981", 250,  5,  60, 260, SunRequirement.SHADE),
+
+    # --- Kök ve yumru ---
+    ("patates",   "Patates",   "🥔", "#d4a373", 400, 100, 100, 350, SunRequirement.FULL),
+    ("tatli-patates", "Tatlı Patates", "🍠", "#e07a5f", 500, 80, 120, 380, SunRequirement.FULL),
+    ("pirasa",    "Pırasa",    "🧅", "#a7f3d0", 150, 15, 130, 200, SunRequirement.FULL),
+
+    # --- Baklagiller ---
+    ("fasulye",   "Fasulye",   "🫘", "#84cc16", 250, 30,  60, 300, SunRequirement.FULL),
+    ("bezelye",   "Bezelye",   "🫛", "#a3e635", 200, 25,  65, 280, SunRequirement.PARTIAL),
+    ("nohut",     "Nohut",     "🫘", "#d6d3d1", 200, 40, 100, 220, SunRequirement.FULL),
+
+    # --- Bostan (yayılan, çok su isteyen) ---
+    ("karpuz",    "Karpuz",    "🍉", "#22c55e", 1200, 25,  90, 800, SunRequirement.FULL),
+    ("kavun",     "Kavun",     "🍈", "#bef264", 1000, 25,  85, 750, SunRequirement.FULL),
+    ("uzum",      "Üzüm",      "🍇", "#7c3aed", 1500,  0, 150, 600, SunRequirement.FULL),
+
+    # --- Yapraklılar ---
+    ("lahana",    "Lahana",    "🥬", "#86efac", 500, 10,  95, 450, SunRequirement.FULL),
+    ("karnabahar", "Karnabahar", "🥦", "#f1f5f9", 480, 12,  90, 430, SunRequirement.FULL),
+    ("roka",      "Roka",      "🥬", "#65a30d", 150,  5,  35, 160, SunRequirement.PARTIAL),
+    ("kereviz",   "Kereviz",   "🥬", "#d9f99d", 250,  5, 120, 300, SunRequirement.PARTIAL),
+    ("pazi",      "Pazı",      "🥬", "#15803d", 300,  8,  55, 320, SunRequirement.PARTIAL),
+
+    # --- Otlar ---
+    ("maydanoz",  "Maydanoz",  "🌿", "#22c55e", 150,  5,  70, 180, SunRequirement.PARTIAL),
+    ("dereotu",   "Dereotu",   "🌿", "#4ade80", 150,  5,  55, 170, SunRequirement.PARTIAL),
+    ("kekik",     "Kekik",     "🌿", "#94a3b8", 200,  3,  90, 120, SunRequirement.FULL),
+    ("biberiye",  "Biberiye",  "🌿", "#64748b", 300,  5, 180, 150, SunRequirement.FULL),
+    ("semizotu",  "Semizotu",  "🌿", "#16a34a", 200,  5,  40, 200, SunRequirement.FULL),
+
+    # --- Diğer ---
+    ("aycicegi",  "Ayçiçeği",  "🌻", "#facc15", 400, 25, 100, 500, SunRequirement.FULL),
+    ("bamya",     "Bamya",     "🌿", "#4d7c0f", 350, 20,  65, 380, SunRequirement.FULL),
 ]
 
 

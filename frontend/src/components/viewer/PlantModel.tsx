@@ -31,23 +31,55 @@ export type PlantForm = "stalk" | "vine" | "rosette" | "root" | "bush" | "herb";
  * gelirse "bush" makul bir orta yol.
  */
 const FORM_BY_SLUG: Record<string, PlantForm> = {
+  // Tek uzun sap
   misir: "stalk",
+  aycicegi: "stalk",
+
+  // Yere yayılan / sarılan — meyve toprakta ya da asmada
   cilek: "vine",
   kabak: "vine",
   salatalik: "vine",
+  karpuz: "vine",
+  kavun: "vine",
+  uzum: "vine",
+  fasulye: "vine",
+  bezelye: "vine",
+
+  // Sapsız, iç içe geçen geniş yapraklar
   marul: "rosette",
   ispanak: "rosette",
   brokoli: "rosette",
+  lahana: "rosette",
+  karnabahar: "rosette",
+  roka: "rosette",
+  kereviz: "rosette",
+  pazi: "rosette",
+
+  // Dik ince yapraklar, toprakta şişkinlik
   havuc: "root",
   turp: "root",
   sogan: "root",
   sarimsak: "root",
+  patates: "root",
+  "tatli-patates": "root",
+  pirasa: "root",
+
+  // Dallı çalı, meyveler sarkıyor
   domates: "bush",
   biber: "bush",
   patlican: "bush",
+  bamya: "bush",
+  nohut: "bush",
+
+  // Alçak, sık, küçük yapraklı
   "fesleğen": "herb",
   feslegen: "herb",
   nane: "herb",
+  maydanoz: "herb",
+  dereotu: "herb",
+  kekik: "herb",
+  biberiye: "herb",
+  semizotu: "herb",
 };
 
 export function formForSlug(slug: string): PlantForm {
