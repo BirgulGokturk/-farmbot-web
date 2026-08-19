@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
@@ -98,8 +99,8 @@ app.mount(
 )
 
 
-@app.get("/", tags=["Sistem"])
-async def root() -> dict[str, str]:
+@app.get("/api", tags=["Sistem"])
+async def api_root() -> dict[str, str]:
     return {
         "name": settings.APP_NAME,
         "version": "0.1.0",
@@ -133,3 +134,65 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         status_code=500,
         content={"detail": "Sunucuda beklenmeyen bir hata oluştu"},
     )
+
+
+# --------------------------------------------------------------------------- #
+# Yerel ağ kipi: arayüzü de bu sunucu versin
+# --------------------------------------------------------------------------- #
+#
+# Bulut üzerinden gitmenin bedeli var: cihaz token'ı, uyanma gecikmesi ve
+# internet kesildiğinde robotun yönetilememesi. Pi ile tarayıcı aynı ağdaysa
+# bunların hiçbirine gerek yok — arayüz de veri de aynı adresten gelebilir.
+#
+# İsteğe bağlı: `FRONTEND_DIST` boşsa hiçbir şey değişmiyor ve bulut kurulumu
+# aynen çalışmaya devam ediyor.
+
+def _frontend_root() -> Path | None:
+    if not settings.FRONTEND_DIST:
+        return None
+    root = Path(settings.FRONTEND_DIST).expanduser().resolve()
+    if not (root / "index.html").is_file():
+        logger.warning(
+            "FRONTEND_DIST=%s içinde index.html yok; arayüz sunulmayacak. "
+            "Önce `npm run build` çalıştırın.",
+            root,
+        )
+        return None
+    return root
+
+
+_FRONTEND = _frontend_root()
+
+# Bu ön ekler arayüze düşmemeli: var olmayan bir API yolu 404 JSON dönmeli,
+# index.html değil. Aksi hâlde yazım hatası olan bir istek sessizce HTML alır
+# ve istemci "beklenmedik yanıt" diye anlaşılmaz bir hata gösterir.
+_SUNUCU_ONEKLERI = ("api", "docs", "redoc", "openapi.json", "health", "media")
+
+if _FRONTEND is not None:
+    logger.info("Arayüz yerel olarak sunuluyor: %s", _FRONTEND)
+
+    app.mount(
+        "/assets",
+        StaticFiles(directory=_FRONTEND / "assets"),
+        name="frontend-assets",
+    )
+
+    @app.get("/{yol:path}", include_in_schema=False)
+    async def spa(yol: str) -> Response:
+        """Tek sayfa uygulaması: dosya varsa onu, yoksa index.html.
+
+        React Router yolları (/settings, /viewer…) sunucuda dosya karşılığı
+        olmayan adresler; sayfa yenilendiğinde 404 almamaları için index.html
+        dönüyoruz ve yönlendirmeyi tarayıcıdaki router yapıyor.
+        """
+        if yol.split("/", 1)[0] in _SUNUCU_ONEKLERI:
+            return JSONResponse({"detail": "Bulunamadı"}, status_code=404)
+
+        # `resolve()` ile dizin dışına çıkma denemelerini eliyoruz: ".." içeren
+        # bir istek kök dizinin dışındaki dosyaları okuyabilirdi.
+        if yol:
+            aday = (_FRONTEND / yol).resolve()
+            if aday.is_file() and aday.is_relative_to(_FRONTEND):
+                return FileResponse(aday)
+
+        return FileResponse(_FRONTEND / "index.html")

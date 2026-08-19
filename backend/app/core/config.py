@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 gün
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # --- Yerel ağ kipi ---
+    # Ön yüzün derlenmiş hâlinin yolu. Doluysa API aynı adresten hem arayüzü
+    # hem veriyi sunuyor ve buluta hiç ihtiyaç kalmıyor.
+    #
+    # Neden işe yarıyor: arayüz `VITE_API_URL` boşken API'yi kendi origin'inde
+    # arıyor, WebSocket adresini de `window.location.origin`'den türetiyor.
+    # Yani tek adres (http://<pi-adresi>:8000) her şeyi karşılıyor; ayrı bir
+    # ayar, ayrı bir port ve CORS gerekmiyor.
+    FRONTEND_DIST: str | None = None
+
     # --- CORS ---
     # NoDecode şart: pydantic-settings, liste tipindeki alanları ortam
     # değişkeninden okurken önce JSON olarak ayrıştırmayı dener ve
