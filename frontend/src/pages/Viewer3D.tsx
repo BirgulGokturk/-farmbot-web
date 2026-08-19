@@ -6,8 +6,8 @@
  * robotun canlı konumuna göre hareket eder.
  */
 
-import { Suspense, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Grid, Html, OrbitControls } from "@react-three/drei";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, Info, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
@@ -58,6 +58,58 @@ function cameraPosition(
     (LEG_HEIGHT + travel.z * 0.6) * viewer.zoom,
     travel.y / 2 + angle.sz * reach,
   ];
+}
+
+/**
+ * Bakış açısını kameraya gerçekten uygular.
+ *
+ * Çözdüğü hata: `<Canvas camera={...}>` prop'u yalnızca **ilk kurulumda**
+ * okunuyor. Sonradan değişmesi kamerayı kımıldatmıyor — bu yüzden açı
+ * düğmeleri ve yakınlaştırma kaydırıcısı ayarı kaydediyor ama sahnede hiçbir
+ * şey olmuyordu.
+ *
+ * Kamerayı burada elle konumlandırıyoruz. `OrbitControls` kendi durumunu
+ * tuttuğu için onun hedefini de güncelleyip `update()` çağırmak şart; yoksa
+ * kontrol bir sonraki karede kamerayı eski yerine geri çekiyor.
+ */
+function CameraRig({
+  travel,
+  viewer,
+  target,
+}: {
+  travel: { x: number; y: number; z: number };
+  viewer: ViewerConfig;
+  target: [number, number, number];
+}) {
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls) as
+    | { target: { set: (x: number, y: number, z: number) => void }; update: () => void }
+    | null;
+
+  useEffect(() => {
+    const [x, y, z] = cameraPosition(travel, viewer);
+    camera.position.set(x, y, z);
+    camera.lookAt(target[0], target[1], target[2]);
+    camera.updateProjectionMatrix();
+
+    if (controls) {
+      controls.target.set(target[0], target[1], target[2]);
+      controls.update();
+    }
+  }, [
+    camera,
+    controls,
+    viewer.camera_angle,
+    viewer.zoom,
+    travel.x,
+    travel.y,
+    travel.z,
+    target[0],
+    target[1],
+    target[2],
+  ]);
+
+  return null;
 }
 
 /** Milimetreden sahne birimine (metre). */
@@ -356,13 +408,6 @@ function Slider({
 const PROFILE = 0.02;
 /** Tezgâh ayak yüksekliği (m). */
 const LEG_HEIGHT = 0.62;
-/**
- * X rayının yataktan taşan uzantısı (m).
- *
- * Ray yatağın dışına çıkıyor ve elektrik panosu bu uzantının altına asılı
- * duruyor. Uzantı kısa kalınca pano yatağın kenarına yapışık görünüyordu.
- */
-const RAIL_OVERHANG = 0.18;
 
 const ALUMINIUM = { color: "#c9ced6", metalness: 0.85, roughness: 0.32 } as const;
 const DARK_PART = { color: "#2a2f38", metalness: 0.5, roughness: 0.55 } as const;
@@ -593,66 +638,6 @@ function SoilBin({
   );
 }
 
-/**
- * Kablo taşıma zinciri.
- *
- * Eksen boyunca uzanan, birbirine geçmiş baklalardan oluşuyor. Makinenin
- * "canlı" görünmesini sağlayan en belirgin ayrıntı: fotoğrafta motor
- * kablolarını taşıyan siyah zincir bu.
- */
-function DragChain({
-  from,
-  to,
-  y,
-  z,
-}: {
-  from: number;
-  to: number;
-  y: number;
-  z: number;
-}) {
-  const link = PROFILE * 0.9;
-  const count = Math.max(4, Math.min(40, Math.floor(Math.abs(to - from) / link)));
-
-  return (
-    <group>
-      {Array.from({ length: count }, (_, i) => {
-        const t = i / Math.max(1, count - 1);
-        return (
-          <mesh key={i} position={[from + (to - from) * t, y, z]} castShadow>
-            <boxGeometry args={[link * 0.8, link * 0.55, link * 0.7]} />
-            <meshStandardMaterial color="#1f2329" roughness={0.75} />
-          </mesh>
-        );
-      })}
-    </group>
-  );
-}
-
-/** Uç yuvası — bekleyen aletlerin durduğu küçük askı. */
-function ToolRack({ x, y, z }: { x: number; y: number; z: number }) {
-  const tools = ["#3b82f6", "#f59e0b", "#22c55e"];
-  return (
-    <group position={[x, y, z]}>
-      {/* Askı çubuğu */}
-      <Extrusion size={[PROFILE * 6, PROFILE * 0.6, PROFILE * 0.6]} position={[0, 0, 0]} slot={false} />
-      {tools.map((color, index) => (
-        <group key={index} position={[(index - 1) * PROFILE * 2, -PROFILE * 1.6, 0]}>
-          <mesh castShadow>
-            <cylinderGeometry args={[PROFILE * 0.6, PROFILE * 0.6, PROFILE * 2.4, 12]} />
-            <meshStandardMaterial color={color} roughness={0.5} metalness={0.2} />
-          </mesh>
-          <mesh position={[0, -PROFILE * 1.5, 0]} castShadow>
-            <coneGeometry args={[PROFILE * 0.4, PROFILE * 1, 10]} />
-            <meshStandardMaterial color="#6b7280" metalness={0.7} roughness={0.35} />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  );
-}
-
-/** Aletin toplam boyu (m) — hızlı bağlantı + uç. Portal yüksekliği buna bağlı. */
 const TOOL_LENGTH = 0.12;
 
 /**
@@ -752,57 +737,6 @@ function ToolHead({ kind }: { kind: string | null }) {
   );
 }
 
-/**
- * Elektrik kutusu — X ekseninin ucundaki çıkıntıya monte.
- *
- * Sahada bu, yerde duran bir pano değil: X rayının ucundaki uzantıya asılmış,
- * soğutma kanatlı küçük bir kutu (fotoğrafta turuncu okla işaretli). Önce
- * yerde duran büyük bir dolap olarak çizilmişti — hem ölçeği hem yeri
- * yanlıştı ve makineden büyük görünüyordu.
- */
-function ControlEnclosure({
-  x,
-  y,
-  z,
-}: {
-  x: number;
-  y: number;
-  z: number;
-}) {
-  // Derinlik önce 60 mm idi; uzaktan bakınca çizgi gibi kalıp koyu zeminde
-  // seçilmiyordu. Pano yine küçük ama artık ayırt ediliyor.
-  const w = PROFILE * 8;
-  const h = PROFILE * 10;
-  const d = PROFILE * 5;
-
-  return (
-    <group position={[x, y, z]}>
-      {/* Gövde */}
-      <mesh castShadow receiveShadow>
-        <boxGeometry args={[d, h, w]} />
-        <meshStandardMaterial color="#cdd3da" metalness={0.35} roughness={0.45} />
-      </mesh>
-      {/* Soğutma kanatları — fotoğraftaki dikey çizgiler */}
-      {[-2, -1, 0, 1, 2].map((i) => (
-        <mesh key={i} position={[d / 2 + 0.001, 0, i * PROFILE * 1.1]}>
-          <boxGeometry args={[0.003, h * 0.8, PROFILE * 0.35]} />
-          <meshStandardMaterial color="#8b939c" metalness={0.45} roughness={0.55} />
-        </mesh>
-      ))}
-      {/* Durum ledi */}
-      <mesh position={[d / 2 + 0.004, h * 0.36, w * 0.32]}>
-        <cylinderGeometry args={[0.005, 0.005, 0.004, 10]} />
-        <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.9} />
-      </mesh>
-      {/* Kablo demeti — kutudan makineye */}
-      <mesh position={[0, -h * 0.55, -w * 0.2]} rotation={[0.35, 0, 0]} castShadow>
-        <cylinderGeometry args={[PROFILE * 0.3, PROFILE * 0.3, PROFILE * 4, 8]} />
-        <meshStandardMaterial color="#15181d" roughness={0.85} />
-      </mesh>
-    </group>
-  );
-}
-
 function Scene({
   points,
   position,
@@ -889,35 +823,16 @@ function Scene({
         />
       )}
 
+      <CameraRig
+        travel={travel}
+        viewer={viewer}
+        target={[width / 2, soilY, length / 2]}
+      />
+
       <Bench width={width} length={length} height={benchHeight} />
 
       {/* Toprak dolu saklama kabı — çerçevenin içi artık boş değil */}
       <SoilBin width={width} length={length} top={benchHeight} depth={binDepth} />
-
-      {/* Kablo taşıma zinciri, X rayı boyunca */}
-      <DragChain
-        from={0}
-        to={width}
-        y={benchHeight + PROFILE * 2.6}
-        z={-PROFILE}
-      />
-
-      {/* Elektrik kutusu — X uzantısının ucunda, **ön raya asılı**.
-          Önce iki rayın tam ortasına konmuştu: hiçbirine değmiyor, havada
-          duruyordu. Kutu raydan aşağı sarkar, üstüne binmez. */}
-      <ControlEnclosure
-        x={-RAIL_OVERHANG * 0.55}
-        y={benchHeight - PROFILE * 4}
-        z={length / 2}
-      />
-
-      {/* Bekleyen uçların askısı — kabın uzak ucunda, toprağın üstünde durur.
-          Çerçevenin dışına koymak havada asılı gibi görünüyordu. */}
-      <ToolRack
-        x={width * 0.5}
-        y={soilY + PROFILE * 2.6}
-        z={length - PROFILE * 3}
-      />
 
       <RobotRig
         width={width}
@@ -946,6 +861,7 @@ function Scene({
       ))}
 
       <OrbitControls
+        makeDefault
         target={[width / 2, soilY, length / 2]}
         enableDamping
         maxPolarAngle={Math.PI / 2.05}
@@ -1005,30 +921,14 @@ function RobotRig({
 
   return (
     <>
-      {/* Yan raylar.
-          X ucunda çerçeveden taşan bir çıkıntı var; elektrik kutusu oraya
-          asılı duruyor (fotoğraf). Ray bu yüzden yatak boyundan uzun. */}
+      {/* Yan raylar — portalın üzerinde yürüdüğü profiller */}
       {[0, length].map((z) => (
         <Extrusion
           key={z}
-          size={[width + RAIL_OVERHANG, PROFILE, PROFILE * 2]}
-          position={[width / 2 - RAIL_OVERHANG / 2, benchHeight + PROFILE, z]}
+          size={[width, PROFILE, PROFILE * 2]}
+          position={[width / 2, benchHeight + PROFILE, z]}
         />
       ))}
-      {/* Panoyu uzantıya bağlayan askı — iki ray arasına köprü kuruyor */}
-      <mesh
-        position={[-RAIL_OVERHANG * 0.55, benchHeight + PROFILE * 0.4, length / 2]}
-        castShadow
-      >
-        <boxGeometry args={[PROFILE * 2, PROFILE * 1.2, length]} />
-        <meshStandardMaterial {...DARK_PART} />
-      </mesh>
-
-      {/* Çıkıntıyı çerçeveye bağlayan enine profil */}
-      <Extrusion
-        size={[PROFILE, PROFILE, length]}
-        position={[-PROFILE * 5, benchHeight + PROFILE, length / 2]}
-      />
 
       <group ref={gantry}>
         {[0, length].map((z) => (
