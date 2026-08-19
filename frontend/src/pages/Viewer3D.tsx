@@ -116,6 +116,15 @@ function CameraRig({
 const MM = 0.001;
 /** Konum sıçramalarını yumuşatan yaklaşma katsayısı. */
 const SMOOTHING = 0.12;
+/**
+ * Hareketin bittiği sayılan mesafe (metre) — 0,5 mm.
+ *
+ * Üstel yumuşatma hedefe asimptotik yaklaşır, yani matematiksel olarak asla
+ * varmaz. Bir eşik koymazsak "animasyon bitti" diyebileceğimiz an hiç gelmez
+ * ve sahne sonsuza kadar yeniden çizilir. Bu mesafenin altında hedefe
+ * yapıştırıp duruyoruz; 0,5 mm ekranda zaten görünmüyor.
+ */
+const SETTLE_EPSILON = 0.0005;
 
 export default function Viewer3D() {
   const deviceId = useDeviceId();
@@ -203,6 +212,19 @@ export default function Viewer3D() {
                   fov: 45,
                 }}
                 dpr={[1, 2]}
+                /*
+                 * Varsayılan `always` sahneyi saniyede 60 kez yeniden çizer —
+                 * robot dursa, kullanıcı hiçbir şeye dokunmasa bile. Ölçümde
+                 * bunun bedeli kare başına ~20 ms CPU'ydu ve hiç bitmiyordu;
+                 * kiosk ekranında panel açık kaldığı sürece işlemciyi meşgul
+                 * tutuyordu.
+                 *
+                 * `demand` ile çizim yalnızca istendiğinde yapılır. İsteği üç
+                 * yer üretir: sahne ağacı değişince react-three-fiber kendisi,
+                 * kamera gezinirken OrbitControls, ve robot hareket ederken
+                 * aşağıdaki useFrame (bkz. SETTLE_EPSILON).
+                 */
+                frameloop="demand"
               >
                 <Scene
                   points={points ?? []}
@@ -912,23 +934,47 @@ function RobotRig({
   const gantry = useRef<Group>(null);
   const carriage = useRef<Group>(null);
   const zAxis = useRef<Group>(null);
+  const invalidate = useThree((state) => state.invalidate);
+
+  /*
+   * `demand` modunda useFrame yalnızca bir çizim istendiğinde çalışır. Robot
+   * yeni bir konuma geçtiğinde animasyonu başlatacak ilk isteği burada
+   * veriyoruz; sonrasını useFrame kendi kendine zincirliyor.
+   */
+  useEffect(() => {
+    invalidate();
+  }, [invalidate, target.x, target.y, target.z, zTravel]);
 
   useFrame(() => {
-    if (gantry.current) {
-      gantry.current.position.x += (target.x - gantry.current.position.x) * SMOOTHING;
-    }
-    if (carriage.current) {
-      // `target.y` sahne derinliği olarak geliyor (bkz. yToScene); burada
-      // ayrıca çevirmiyoruz.
-      carriage.current.position.z += (target.y - carriage.current.position.z) * SMOOTHING;
-    }
-    if (zAxis.current) {
-      // Z aşağı iniyor; kolonun üst ucu aynı anda kirişin üstünde yükseliyor.
-      // İniş strokla sınırlı: sınır dışı bir değer gelse bile uç kabın
-      // altından geçip görüntüyü bozmasın.
-      const desired = -Math.min(Math.abs(target.z), zTravel);
-      zAxis.current.position.y += (desired - zAxis.current.position.y) * SMOOTHING;
-    }
+    /** Bir ekseni hedefe yaklaştırır; hareket sürüyorsa true döner. */
+    const approach = (group: Group | null, axis: "x" | "y" | "z", desired: number) => {
+      if (!group) return false;
+      const distance = desired - group.position[axis];
+      if (Math.abs(distance) < SETTLE_EPSILON) {
+        group.position[axis] = desired;
+        return false;
+      }
+      group.position[axis] += distance * SMOOTHING;
+      return true;
+    };
+
+    // Z aşağı iniyor; kolonun üst ucu aynı anda kirişin üstünde yükseliyor.
+    // İniş strokla sınırlı: sınır dışı bir değer gelse bile uç kabın altından
+    // geçip görüntüyü bozmasın.
+    const zDesired = -Math.min(Math.abs(target.z), zTravel);
+
+    // Üçü de çalışmalı — dizi kullanmamızın sebebi `||` operatörünün kısa
+    // devre yapıp kalan eksenleri atlamasını önlemek.
+    // `target.y` sahne derinliği olarak geliyor (bkz. yToScene); burada ayrıca
+    // çevirmiyoruz.
+    const moving = [
+      approach(gantry.current, "x", target.x),
+      approach(carriage.current, "z", target.y),
+      approach(zAxis.current, "y", zDesired),
+    ].some(Boolean);
+
+    // Hareket bittiyse yeni kare istemiyoruz; döngü burada duruyor.
+    if (moving) invalidate();
   });
 
   const beamY = benchHeight + portal;
