@@ -21,6 +21,7 @@ const Curves = lazy(() => import("@/pages/Curves"));
 const Schedule = lazy(() => import("@/pages/Schedule"));
 const Logs = lazy(() => import("@/pages/Logs"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
+const Setup = lazy(() => import("@/pages/Setup"));
 
 function PageFallback() {
   return (
@@ -72,6 +73,7 @@ export default function App() {
           <Route path="schedule" element={<Schedule />} />
           <Route path="logs" element={<Logs />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="setup" element={<Setup />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

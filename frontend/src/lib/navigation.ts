@@ -17,6 +17,7 @@ import {
   ScrollText,
   Settings,
   Workflow,
+  Rocket,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -135,6 +136,12 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Kayıtlar",
         icon: ScrollText,
         description: "Robottan gelen canlı olay akışı",
+      },
+      {
+        path: "/setup",
+        label: "Kurulum",
+        icon: Rocket,
+        description: "Yeni makineyi ayağa kaldırma sihirbazı",
       },
       {
         path: "/settings",

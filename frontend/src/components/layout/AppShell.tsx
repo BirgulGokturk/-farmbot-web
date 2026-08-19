@@ -9,6 +9,7 @@ import SetupDevice from "@/pages/SetupDevice";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { MobileNav } from "./MobileNav";
 import { Sidebar } from "./Sidebar";
+import { StatusBar } from "./StatusBar";
 import { Topbar } from "./Topbar";
 
 /**
@@ -60,6 +61,10 @@ export function AppShell() {
 
       <div className="lg:pl-72">
         <Topbar onOpenMenu={() => setMenuOpen(true)} />
+
+        {/* Robotun durumu her sayfada görünür olmalı: tasarımcıdayken kilitli
+            olduğunu fark etmenin başka yolu yoktu. */}
+        <StatusBar />
 
         {/* Alt boşluk: mobil alt menünün içeriği örtmemesi için */}
         <main className="mx-auto w-full max-w-[1600px] px-4 py-6 pb-28 sm:px-6 lg:pb-10">
