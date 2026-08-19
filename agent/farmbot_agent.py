@@ -113,8 +113,17 @@ class SerialLink:
         port = await asyncio.to_thread(self._resolve_port)
 
         def _open() -> serial.Serial:
+            # `exclusive`: portu tek sahiplenelim.
+            #
+            # Linux'ta seri portu iki program birden açabiliyor ve ikisi de
+            # başarılı sanıyor; sonra gelen baytları birbirlerinden çalıyorlar.
+            # Belirtisi "device reports readiness to read but returned no data"
+            # — yani bağlanıyor, ilk satırı okuyor, sonra sürekli kopuyor.
+            # Kilitle birlikte ikinci örnek açılışta net bir hata alıyor,
+            # ortada iki ajan varken saatlerce sinyal aramak gerekmiyor.
+            #
             # timeout: readline'ın sonsuza kadar beklememesi için
-            return serial.Serial(port, self.baudrate, timeout=2)
+            return serial.Serial(port, self.baudrate, timeout=2, exclusive=True)
 
         self._serial = await asyncio.to_thread(_open)
         self.port = port
