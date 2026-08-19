@@ -20,8 +20,9 @@ export interface AxisConfig {
   /** Yumuşak sınırlar. null = makinenin kendi sınırı geçerli. */
   min_mm: number | null;
   max_mm: number | null;
-  speed: number;
-  accel: number;
+  /** Hız tavanı (mm/s). `null` = makinenin kendi değeri geçerli. */
+  speed: number | null;
+  accel: number | null;
 }
 
 export interface ToolSlot {
@@ -64,8 +65,8 @@ export const AXIS_DEFAULTS: AxisConfig = {
   home_mm: null,
   min_mm: null,
   max_mm: null,
-  speed: 20,
-  accel: 100,
+  speed: null,
+  accel: null,
 };
 
 export const TOOL_ZONE_DEFAULTS: ToolZoneConfig = {
@@ -115,8 +116,8 @@ function readAxis(raw: unknown): AxisConfig {
     home_mm: optionalNum(source.home_mm),
     min_mm: optionalNum(source.min_mm),
     max_mm: optionalNum(source.max_mm),
-    speed: num(source.speed, AXIS_DEFAULTS.speed),
-    accel: num(source.accel, AXIS_DEFAULTS.accel),
+    speed: optionalNum(source.speed),
+    accel: optionalNum(source.accel),
   };
 }
 

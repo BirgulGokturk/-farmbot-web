@@ -68,8 +68,8 @@ NEUTRAL_AXIS: dict[str, Any] = {
     "home_mm": None,
     "min_mm": None,
     "max_mm": None,
-    "speed": 20.0,
-    "accel": 100.0,
+    "speed": None,
+    "accel": None,
 }
 
 
@@ -268,7 +268,11 @@ class AxisCalibration:
         düşük tavan geçerli olmalı, yoksa yavaş eksen kapasitesinin üzerine
         zorlanır.
         """
-        limits = [float(self.get(name)["speed"]) for name in axes if name in AXIS_INDEX]
+        limits = [
+            float(self.get(name)["speed"])
+            for name in axes
+            if name in AXIS_INDEX and self.get(name).get("speed") is not None
+        ]
         return min([requested, *limits]) if limits else requested
 
 
@@ -463,7 +467,8 @@ class GantryClient:
             self.calibration.check_limits(axis, millimetres)
         value = millimetres
 
-        effective = speed if speed is not None else float(self.calibration.get(axis)["speed"])
+        cap = self.calibration.get(axis).get("speed")
+        effective = speed if speed is not None else float(cap) if cap is not None else 20.0
         await self.command(
             {"cmd": "movej", "axis": AXIS_INDEX[axis], "value": value, "speed": effective}
         )
@@ -524,9 +529,9 @@ class GantryClient:
             {
                 "cmd": "speed",
                 "axis": AXIS_INDEX[axis],
-                "vel": float(cfg["speed"]),
-                "accel": float(cfg["accel"]),
-                "decel": float(cfg["accel"]),
+                "vel": float(cfg["speed"] if cfg.get("speed") is not None else 20.0),
+                "accel": float(cfg["accel"] if cfg.get("accel") is not None else 100.0),
+                "decel": float(cfg["accel"] if cfg.get("accel") is not None else 100.0),
             }
         )
 

@@ -111,6 +111,8 @@ export interface DeviceStatus {
       vel?: number | null; accel?: number | null; decel?: number | null;
       pos?: number | null; err?: string | null; off?: boolean;
     }[];
+    /** Makinenin kendi kalibrasyonu — panelde referans olarak gösteriliyor. */
+    machine_calib?: Record<string, { cpm: number; dir: number; home: number; min: number; max: number }>;
     gantry_latency_ms?: number | null;
     presence?: boolean | null;
   };

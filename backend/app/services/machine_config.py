@@ -40,8 +40,8 @@ AXIS_DEFAULTS: dict[str, Any] = {
     "home_mm": None,   # sıfır noktasının mm karşılığı
     "min_mm": None,    # yumuşak sınırlar; None = makineninki geçerli
     "max_mm": None,
-    "speed": 20.0,     # eksene özel hız tavanı
-    "accel": 100.0,    # eksene özel ivme
+    "speed": None,     # hız tavanı (mm/s); None = makineninkini kullan
+    "accel": None,     # ivme; None = makineninkini kullan
 }
 
 TOOL_ZONE_DEFAULTS: dict[str, Any] = {
@@ -78,7 +78,7 @@ _AXIS_RANGE_BOUNDS: dict[str, tuple[float, float]] = {
 }
 
 # Boş bırakılabilen alanlar: değer yoksa o sınır uygulanmıyor
-_OPTIONAL_AXIS_KEYS = ("cpm", "dir", "home_mm", "min_mm", "max_mm")
+_OPTIONAL_AXIS_KEYS = ("cpm", "dir", "home_mm", "min_mm", "max_mm", "speed", "accel")
 
 
 def _number(

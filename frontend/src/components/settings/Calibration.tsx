@@ -29,7 +29,7 @@ import {
   type AxisName,
 } from "@/lib/machine";
 import { useServerForm } from "@/hooks/useServerForm";
-import { useBotPosition } from "@/store/useBot";
+import { useBot, useBotPosition } from "@/store/useBot";
 import type { Device } from "@/lib/types";
 
 export function Calibration({ device }: { device: Device }) {
@@ -40,6 +40,33 @@ export function Calibration({ device }: { device: Device }) {
   const [axes, setAxes, axesDirty] = useServerForm(stored.axes);
   const [limitsOn, setLimitsOn, limitsDirty] = useServerForm(stored.limits_enabled);
   const position = useBotPosition();
+
+  /**
+   * Makinenin kendi kalibrasyonu ve o anki hız/ivme değerleri.
+   *
+   * Tabloda referans olarak gösteriliyor: bir alan boşken hangi değerin
+   * geçerli olduğunu görmek gerekiyor. Önceden hız/ivme sütunlarında panelin
+   * kendi varsayılanları (20/100) yazıyordu — makineyle hiç ilgisi yoktu ve
+   * "yazan değer gerçeği yansıtmıyor" durumuna yol açıyordu.
+   */
+  const diagnostics = useBot((s) => s.status?.diagnostics);
+  const machine = diagnostics?.machine_calib ?? {};
+  const rawAxes = diagnostics?.axes_raw ?? [];
+
+  /** Ham register hızını mm/s'ye çevirir; PLC count/s tutuyor. */
+  function machineSpeed(axis: AxisName, index: number): number | null {
+    const raw = rawAxes[index]?.vel;
+    const cpm = machine[axis]?.cpm;
+    if (raw == null || !cpm) return null;
+    return raw / cpm;
+  }
+  function machineAccel(axis: AxisName, index: number): number | null {
+    const raw = rawAxes[index]?.accel;
+    const cpm = machine[axis]?.cpm;
+    if (raw == null || !cpm) return null;
+    return raw / cpm;
+  }
+
 
   /** Ölçüm sihirbazının eksen başına işaretlediği başlangıç konumu (mm). */
   const [marks, setMarks] = useState<Partial<Record<AxisName, number>>>({});
@@ -137,9 +164,12 @@ export function Calibration({ device }: { device: Device }) {
             </tr>
           </thead>
           <tbody>
-            {AXES.map((axis) => {
+            {AXES.map((axis, index) => {
               const config = axes[axis];
               const marked = marks[axis];
+              const m = machine[axis];
+              const hint = (value: number | null | undefined, digits = 0) =>
+                value == null ? "makineden" : value.toFixed(digits);
               return (
                 <tr key={axis} className="border-b border-line/60 last:border-0">
                   <td className="px-2 py-2.5 font-semibold text-content">{axis.toUpperCase()}</td>
@@ -148,7 +178,7 @@ export function Calibration({ device }: { device: Device }) {
                     <Cell
                       name={`cpm-${axis}`}
                       value={config.cpm}
-                      placeholder="makineden"
+                      placeholder={hint(m?.cpm, 4)}
                       onChange={(value) => patch(axis, { cpm: value })}
                     />
                   </td>
@@ -183,6 +213,7 @@ export function Calibration({ device }: { device: Device }) {
                     <Cell
                       name={`home-${axis}`}
                       value={config.home_mm}
+                      placeholder={hint(m?.home)}
                       onChange={(value) => patch(axis, { home_mm: value })}
                     />
                   </td>
@@ -190,6 +221,7 @@ export function Calibration({ device }: { device: Device }) {
                     <Cell
                       name={`min-${axis}`}
                       value={config.min_mm}
+                      placeholder={hint(m?.min)}
                       onChange={(value) => patch(axis, { min_mm: value })}
                     />
                   </td>
@@ -197,6 +229,7 @@ export function Calibration({ device }: { device: Device }) {
                     <Cell
                       name={`max-${axis}`}
                       value={config.max_mm}
+                      placeholder={hint(m?.max)}
                       onChange={(value) => patch(axis, { max_mm: value })}
                     />
                   </td>
@@ -205,14 +238,16 @@ export function Calibration({ device }: { device: Device }) {
                     <Cell
                       name={`speed-${axis}`}
                       value={config.speed}
-                      onChange={(value) => patch(axis, { speed: value ?? 20 })}
+                      placeholder={hint(machineSpeed(axis, index), 1)}
+                      onChange={(value) => patch(axis, { speed: value })}
                     />
                   </td>
                   <td className="px-2 py-2.5">
                     <Cell
                       name={`accel-${axis}`}
                       value={config.accel}
-                      onChange={(value) => patch(axis, { accel: value ?? 100 })}
+                      placeholder={hint(machineAccel(axis, index), 0)}
+                      onChange={(value) => patch(axis, { accel: value })}
                     />
                   </td>
 
