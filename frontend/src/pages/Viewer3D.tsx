@@ -714,62 +714,48 @@ function ToolHead({ kind }: { kind: string | null }) {
 }
 
 /**
- * Elektrik kabini — makinenin yanında duran pano.
+ * Elektrik kutusu — X ekseninin ucundaki çıkıntıya monte.
  *
- * Sahada makinenin sağında ayrı bir kabin var; sürücüler, PLC ve besleme orada.
- * Sahnede bulunması hem gerçeğe uyuyor hem de makinenin ölçeğini okunur kılıyor.
+ * Sahada bu, yerde duran bir pano değil: X rayının ucundaki uzantıya asılmış,
+ * soğutma kanatlı küçük bir kutu (fotoğrafta turuncu okla işaretli). Önce
+ * yerde duran büyük bir dolap olarak çizilmişti — hem ölçeği hem yeri
+ * yanlıştı ve makineden büyük görünüyordu.
  */
-function ElectricalCabinet({
+function ControlEnclosure({
   x,
+  y,
   z,
-  height,
 }: {
   x: number;
+  y: number;
   z: number;
-  height: number;
 }) {
-  const w = 0.28;
-  const d = 0.2;
+  const w = PROFILE * 7;
+  const h = PROFILE * 9;
+  const d = PROFILE * 3;
 
   return (
-    <group position={[x, 0, z]}>
+    <group position={[x, y, z]}>
       {/* Gövde */}
-      <mesh position={[0, height / 2, 0]} castShadow receiveShadow>
-        <boxGeometry args={[w, height, d]} />
-        <meshStandardMaterial color="#9aa3ad" metalness={0.45} roughness={0.45} />
+      <mesh castShadow receiveShadow>
+        <boxGeometry args={[d, h, w]} />
+        <meshStandardMaterial color="#aeb5bd" metalness={0.4} roughness={0.5} />
       </mesh>
-      {/* Kapak */}
-      <mesh position={[0, height / 2, d / 2 + 0.002]} castShadow>
-        <boxGeometry args={[w * 0.9, height * 0.9, 0.006]} />
-        <meshStandardMaterial color="#b6bec7" metalness={0.5} roughness={0.4} />
-      </mesh>
-      {/* Kol */}
-      <mesh position={[w * 0.36, height * 0.52, d / 2 + 0.014]} castShadow>
-        <boxGeometry args={[0.012, 0.07, 0.014]} />
-        <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.35} />
-      </mesh>
-      {/* Havalandırma dilimleri */}
-      {[0, 1, 2, 3].map((i) => (
-        <mesh key={i} position={[-w * 0.28, height * 0.78 - i * 0.018, d / 2 + 0.008]}>
-          <boxGeometry args={[w * 0.34, 0.006, 0.004]} />
-          <meshStandardMaterial color="#6b7280" roughness={0.7} />
+      {/* Soğutma kanatları — fotoğraftaki dikey çizgiler */}
+      {[-2, -1, 0, 1, 2].map((i) => (
+        <mesh key={i} position={[d / 2 + 0.001, 0, i * PROFILE * 1.1]}>
+          <boxGeometry args={[0.003, h * 0.8, PROFILE * 0.35]} />
+          <meshStandardMaterial color="#8b939c" metalness={0.45} roughness={0.55} />
         </mesh>
       ))}
-      {/* Çalışıyor lambası */}
-      <mesh position={[w * 0.3, height * 0.86, d / 2 + 0.012]}>
-        <cylinderGeometry args={[0.008, 0.008, 0.006, 12]} />
+      {/* Durum ledi */}
+      <mesh position={[d / 2 + 0.004, h * 0.36, w * 0.32]}>
+        <cylinderGeometry args={[0.005, 0.005, 0.004, 10]} />
         <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.9} />
       </mesh>
-      {/* Ayaklar */}
-      {[-1, 1].map((s) => (
-        <mesh key={s} position={[s * w * 0.38, 0.015, 0]} castShadow>
-          <boxGeometry args={[0.02, 0.03, d * 0.8]} />
-          <meshStandardMaterial {...DARK_PART} />
-        </mesh>
-      ))}
-      {/* Makineye giden kablo kanalı */}
-      <mesh position={[-w * 0.6, height * 0.35, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-        <cylinderGeometry args={[0.012, 0.012, w * 0.7, 10]} />
+      {/* Kablo demeti — kutudan makineye */}
+      <mesh position={[0, -h * 0.55, -w * 0.2]} rotation={[0.35, 0, 0]} castShadow>
+        <cylinderGeometry args={[PROFILE * 0.3, PROFILE * 0.3, PROFILE * 4, 8]} />
         <meshStandardMaterial color="#15181d" roughness={0.85} />
       </mesh>
     </group>
@@ -882,11 +868,11 @@ function Scene({
         z={length * 0.22}
       />
 
-      {/* Elektrik kabini — makinenin sağında, sahadaki gibi ayrı duruyor */}
-      <ElectricalCabinet
-        x={width + 0.26}
-        z={length * 0.55}
-        height={benchHeight + portal * 0.45}
+      {/* Elektrik kutusu — X rayının ucundaki çıkıntıda */}
+      <ControlEnclosure
+        x={-PROFILE * 4.5}
+        y={benchHeight + PROFILE * 2}
+        z={length * 0.5}
       />
 
       {/* Bekleyen uçların askısı — kabın uzak ucunda, toprağın üstünde durur.
@@ -983,14 +969,20 @@ function RobotRig({
 
   return (
     <>
-      {/* Yan raylar — portalın üzerinde yürüdüğü profiller */}
+      {/* Yan raylar.
+          X ucunda çerçeveden taşan bir çıkıntı var; elektrik kutusu oraya
+          asılı duruyor (fotoğraf). Ray bu yüzden yatak boyundan uzun. */}
+      {[0, length].map((z) => (
+        <Extrusion
+          key={z}
+          size={[width + PROFILE * 6, PROFILE, PROFILE * 2]}
+          position={[width / 2 - PROFILE * 3, benchHeight + PROFILE, z]}
+        />
+      ))}
+      {/* Çıkıntıyı çerçeveye bağlayan enine profil */}
       <Extrusion
-        size={[width, PROFILE, PROFILE * 2]}
-        position={[width / 2, benchHeight + PROFILE, 0]}
-      />
-      <Extrusion
-        size={[width, PROFILE, PROFILE * 2]}
-        position={[width / 2, benchHeight + PROFILE, length]}
+        size={[PROFILE, PROFILE, length]}
+        position={[-PROFILE * 5, benchHeight + PROFILE, length / 2]}
       />
 
       <group ref={gantry}>
@@ -1038,27 +1030,49 @@ function RobotRig({
           <VWheel position={[PROFILE * 1.3, beamY + PROFILE * 0.9, 0]} />
           <VWheel position={[PROFILE * 1.3, beamY - PROFILE * 0.9, 0]} />
 
+          {/*
+            Z takımı — sahadaki düzen (fotoğraf): arabaya sabit bir motor
+            bloğu, ondan aşağı inen **vidalı mil**, milin yanında kılavuz
+            profil ve profile bağlı hareketli taşıyıcı. Önceki sürümde Z tek
+            ince çubuktu ve kirişin çok üstüne uzanıyordu; çerçeve genişliğinin
+            3 katı boyunda dev bir direk gibi duruyordu.
+          */}
+
+          {/* Motor bloğu arabaya sabit — Z inip çıkarken yerinde kalır */}
+          <mesh position={[PROFILE * 1.7, beamY - PROFILE * 0.6, 0]} castShadow>
+            <boxGeometry args={[PROFILE * 2.6, PROFILE * 3.4, PROFILE * 2.4]} />
+            <meshStandardMaterial {...DARK_PART} />
+          </mesh>
+          <Motor position={[PROFILE * 1.7, beamY + PROFILE * 1.9, 0]} rotation={[Math.PI / 2, 0, 0]} />
+
           <group ref={zAxis}>
-            {/*
-              Z kolonu tek parça uzun profil: aşağı inerken üst ucu kirişin
-              üstünde yükseliyor. Fotoğrafta kirişin çok üstüne uzanan dikey
-              çubuk bu.
-            */}
+            {/* Kılavuz profil — Z stroğu kadar, artı araba payı */}
             <Extrusion
-              size={[PROFILE, portal * 1.9, PROFILE]}
-              position={[PROFILE * 1.6, beamY + portal * 0.42, 0]}
+              size={[PROFILE, zTravel + PROFILE * 6, PROFILE]}
+              position={[PROFILE * 1.7, toolRestY + zTravel / 2, 0]}
             />
-            {/* Z motoru kolonun tepesinde */}
-            <Motor
-              position={[PROFILE * 1.6, beamY + portal * 1.2, 0]}
-              rotation={[Math.PI / 2, 0, 0]}
-            />
-            {/*
-              Değiştirilebilir uç, Z kolonunun alt ucuna takılı. Kolon aşağı
-              indikçe uç toprağa yaklaşıyor; kirişin yüksekliği de bu ucun boyu
-              hesaba katılarak belirlendi (bkz. `portal`).
-            */}
-            <group position={[PROFILE * 1.6, toolRestY, 0]}>
+            {/* Vidalı mil, profilin hemen yanında */}
+            <mesh
+              position={[PROFILE * 0.5, toolRestY + zTravel / 2, 0]}
+              castShadow
+            >
+              <cylinderGeometry
+                args={[PROFILE * 0.16, PROFILE * 0.16, zTravel + PROFILE * 7, 10]}
+              />
+              <meshStandardMaterial color="#aab1ba" metalness={0.9} roughness={0.28} />
+            </mesh>
+            {/* Milin üst ucundaki rulman yuvası */}
+            <mesh position={[PROFILE * 0.5, toolRestY + zTravel + PROFILE * 3.4, 0]} castShadow>
+              <cylinderGeometry args={[PROFILE * 0.45, PROFILE * 0.45, PROFILE * 0.8, 12]} />
+              <meshStandardMaterial {...DARK_PART} />
+            </mesh>
+            {/* Profilin alt ucundaki alet taşıyıcı */}
+            <mesh position={[PROFILE * 1.1, toolRestY + PROFILE * 1.4, 0]} castShadow>
+              <boxGeometry args={[PROFILE * 2.4, PROFILE * 2, PROFILE * 1.8]} />
+              <meshStandardMaterial {...DARK_PART} />
+            </mesh>
+
+            <group position={[PROFILE * 1.1, toolRestY, 0]}>
               <ToolHead kind={tool} />
             </group>
           </group>

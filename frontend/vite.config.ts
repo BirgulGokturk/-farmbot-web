@@ -27,15 +27,13 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: false,
-    rollupOptions: {
-      output: {
-        // Ağır kütüphaneleri ayrı parçalara böl — ilk yükleme hafiflesin
-        manualChunks(id) {
-          if (id.includes("three") || id.includes("@react-three")) return "three";
-          if (id.includes("recharts") || id.includes("d3-")) return "charts";
-          return undefined;
-        },
-      },
-    },
+    // Parçalama elle yapılmıyor: three ve recharts zaten yalnızca lazy
+    // sayfalardan (Viewer3D, Sensors) çağrıldığı için paketleyici bunları
+    // kendiliğinden ayrı chunk'a alıyor.
+    //
+    // Elle yazılan manualChunks kuralı geri tepmişti: `id.includes("three")`
+    // gibi substring eşleşmeleri React ve react-dom'u da o chunk'ların içine
+    // mühürlüyor, entry React'i oradan almak için chunk'ları statik import
+    // etmek zorunda kalıyordu. Sonuç: giriş ekranı için 1,45 MB JS.
   },
 });
