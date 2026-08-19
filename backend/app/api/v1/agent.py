@@ -247,15 +247,31 @@ async def push_machine_config(device: Device) -> bool:
     machine = machine_config.normalize(device.settings)
     return await agent_hub.send_to(
         str(device.id),
-        {
-            "type": "config",
-            "payload": {
-                "axes": machine["axes"],
-                "limits_enabled": machine["limits_enabled"],
-                "travel": machine["travel"],
-            },
-        },
+        {"type": "config", "payload": _agent_config(device, machine)},
     )
+
+
+def _agent_config(device: Device, machine: dict) -> dict:
+    """Ajanın hareket etmeden önce bilmesi gereken her şey.
+
+    Tek yerde üretiliyor: hem bağlantı anında hem ayar değişince gönderiliyor
+    ve ikisinin farklı davranması, "panelde değiştirdim ama robot eskisini
+    kullanıyor" gibi bulunması zor bir hataya yol açardı.
+    """
+    return {
+        "axes": machine["axes"],
+        "limits_enabled": machine["limits_enabled"],
+        # Güvenli geçiş yüksekliği cihaz kaydından geliyor (tek doğruluk
+        # kaynağı; sulama da onu kullanıyor). Koruma kapalıysa hiç
+        # gönderilmiyor: ajan tarafında "kapalı" tek bir durumla (None) temsil
+        # edilsin, iki ayrı bayrak karşılaştırmak gerekmesin.
+        "travel": {
+            "enabled": machine["travel"]["enabled"],
+            "safe_z_mm": (
+                float(device.safe_height_mm) if machine["travel"]["enabled"] else None
+            ),
+        },
+    }
 
 
 def _auto_create_sensor(device_id: uuid.UUID, channel: str) -> Sensor:
@@ -375,6 +391,10 @@ async def agent_socket(websocket: WebSocket, token: str | None = None) -> None:
         # Bağlantı anında da çevrimiçi sayılsın; ilk durum mesajını beklemeden
         device.last_seen_at = now
         machine = machine_config.normalize(device.settings)
+        # Yapılandırma **oturum kapanmadan** hazırlanıyor: `commit()` ORM
+        # alanlarını geçersizleştiriyor ve oturum dışında okumak
+        # DetachedInstanceError veriyor — her ajan bağlantısını kırardı.
+        agent_config = _agent_config(device, machine)
         await session.commit()
 
     _last_touch[device_id] = monotonic()
@@ -393,11 +413,7 @@ async def agent_socket(websocket: WebSocket, token: str | None = None) -> None:
     await websocket.send_json(
         {
             "type": "config",
-            "payload": {
-                "axes": machine["axes"],
-                "limits_enabled": machine["limits_enabled"],
-                "travel": machine["travel"],
-            },
+            "payload": agent_config,
         }
     )
 

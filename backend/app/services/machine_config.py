@@ -71,20 +71,19 @@ PLANTING_AREA_DEFAULTS: dict[str, Any] = {
 }
 
 # --------------------------------------------------------------------------- #
-# Güvenli geçiş yüksekliği
+# Güvenli geçiş
 # --------------------------------------------------------------------------- #
 #
 # Uç aşağıdayken yatayda gitmek, yoldaki her bitkiyi biçer. Bu yüzden her
 # X/Y hareketinden önce Z güvenli yüksekliğe çekilir, varılınca indirilir.
 #
-# `safe_z_mm` neden `None` başlıyor: hangi yönün "yukarı" olduğu makineye
-# göre değişiyor (Z yönü -1, ev 440 mm). Yanlış bir varsayılan, her harekette
-# ucu toprağa sürtmek demek olurdu. Kullanıcı Z'yi elle güvenli bir yüksekliğe
-# getirip "buradan al" diyene kadar bu koruma çalışmıyor ve arayüz bunu
-# açıkça söylüyor — sessizce yanlış davranmaktansa açıkça kapalı olsun.
+# Yüksekliğin kendisi burada tutulmuyor: `device.safe_height_mm` zaten var ve
+# sulama da onu kullanıyor. İkinci bir alan açsaydık iki ayrı "güvenli
+# yükseklik" olurdu ve biri güncellenip diğeri unutulduğunda hangisinin
+# geçerli olduğu belirsizleşirdi. Burada yalnızca korumanın açık olup
+# olmadığı duruyor.
 TRAVEL_DEFAULTS: dict[str, Any] = {
     "enabled": True,
-    "safe_z_mm": None,
 }
 
 # --------------------------------------------------------------------------- #
@@ -268,10 +267,7 @@ def normalize_planting_area(raw: Any) -> dict[str, Any]:
 
 def normalize_travel(raw: Any) -> dict[str, Any]:
     source = raw if isinstance(raw, dict) else {}
-    return {
-        "enabled": source.get("enabled") is not False,
-        "safe_z_mm": _optional_number(source.get("safe_z_mm")),
-    }
+    return {"enabled": source.get("enabled") is not False}
 
 
 def normalize_seeder(raw: Any) -> dict[str, Any]:
