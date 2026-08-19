@@ -8,7 +8,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Grid, Html, OrbitControls } from "@react-three/drei";
+import { Grid, OrbitControls } from "@react-three/drei";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, Info, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import type { Group } from "three";
@@ -16,6 +16,7 @@ import type { Group } from "three";
 import { Badge, Button, Card, PageHeader, Spinner, Toggle } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
+import { PlantModel } from "@/components/viewer/PlantModel";
 import { growthAt } from "@/lib/growth";
 import { readMachineConfig, VIEWER_DEFAULTS, type ViewerConfig } from "@/lib/machine";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
@@ -892,7 +893,7 @@ function Scene({
 
       {/* Bitkiler tezgâh düzleminde duruyor */}
       {plants.map((plant) => (
-        <Plant3D
+        <PlantModel
           key={plant.id}
           x={plant.x * MM}
           z={yToScene(plant.y)}
@@ -1101,169 +1102,3 @@ function RobotRig({
 // --------------------------------------------------------------------------- //
 // Bitkiler
 // --------------------------------------------------------------------------- //
-
-/**
- * Prosedürel bitki: filizden meyveye.
- *
- * Neden tür başına hazır model yok: katalog büyüdükçe her yeni sebze için model
- * hazırlamak gerekirdi. Burada gövde, yapraklar ve meyveler olgunluk oranıyla
- * ölçekleniyor; renk türün kendi renginden geliyor. Yeni bir tür eklendiğinde
- * hiçbir şey yapmadan çalışıyor.
- *
- * Biçimler kasıtlı olarak basit ama **doğru**: yapraklar küre değil, düzleştirilip
- * eğilmiş yüzeyler; gövde aşağı doğru kalınlaşan bir koni; meyveler saptan sarkıyor.
- * Önceki sürümde her şey küreydi ve bitkiden çok köpük yığınına benziyordu.
- *
- * Aşamalar:
- *   0.00 – 0.12  toprakta tohum, yalnızca ekim noktası görünür
- *   0.12 – 0.55  filiz: kısa gövde, açılan yapraklar
- *   0.55 – 1.00  meyvelenme: yapraklar tam boy, meyveler belirip büyüyor
- */
-function Plant3D({
-  x,
-  z,
-  base,
-  radius,
-  species,
-  progress,
-  fontScale,
-  showLabel,
-}: {
-  x: number;
-  z: number;
-  base: number;
-  radius: number;
-  species: { name_tr: string; color: string; icon: string };
-  progress: number;
-  fontScale: number;
-  showLabel: boolean;
-}) {
-  const grown = Math.max(0, (progress - 0.12) / 0.88);
-  const height = radius * (0.35 + grown * 1.5);
-  const leafSpan = radius * (0.3 + grown * 0.8);
-
-  // Meyveler olgunluğun ikinci yarısında beliriyor
-  const fruiting = Math.max(0, (progress - 0.55) / 0.45);
-  const fruitR = radius * 0.26 * fruiting;
-
-  /**
-   * Yaprak yerleşimi altın açıyla dağıtılıyor (137.5°).
-   *
-   * Eşit aralıklı yerleştirmek bitkiyi simetrik ve yapay gösteriyor; gerçek
-   * bitkilerde yapraklar bu açıyla diziliyor ve üst üste binmiyor. Sabit bir
-   * diziden üretiliyor, her karede yeniden hesaplanmıyor.
-   */
-  const leaves = useMemo(() => {
-    const golden = Math.PI * (3 - Math.sqrt(5));
-    return Array.from({ length: 7 }, (_, i) => ({
-      angle: i * golden,
-      // Alttaki yapraklar daha büyük ve daha yatık
-      t: i / 6,
-    }));
-  }, []);
-
-  const fruits = useMemo(() => {
-    const golden = Math.PI * (3 - Math.sqrt(5));
-    return Array.from({ length: 3 }, (_, i) => i * golden + 0.9);
-  }, []);
-
-  return (
-    <group position={[x, base, z]}>
-      {/* Ekim noktası — bitki görünmeden önce de yerini belli etsin */}
-      <mesh position={[0, 0.001, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[radius * 0.3, 20]} />
-        <meshStandardMaterial color="#3d2a1a" roughness={1} />
-      </mesh>
-
-      {/* Yayılma halkası */}
-      <mesh position={[0, 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[radius * 0.94, radius, 40]} />
-        <meshBasicMaterial color={species.color} transparent opacity={0.3} />
-      </mesh>
-
-      {progress > 0.12 && (
-        <>
-          {/* Gövde — aşağı doğru kalınlaşan koni */}
-          <mesh position={[0, height / 2, 0]} castShadow>
-            <cylinderGeometry args={[radius * 0.035, radius * 0.07, height, 7]} />
-            <meshStandardMaterial color="#4a7c3f" roughness={0.85} />
-          </mesh>
-
-          {/* Yapraklar — düzleştirilmiş ve dışa eğilmiş yüzeyler */}
-          {leaves.map((leaf, index) => {
-            const scale = 1 - leaf.t * 0.45;
-            const tilt = 0.75 + leaf.t * 0.5;
-            const y = height * (0.25 + leaf.t * 0.6);
-            const size = leafSpan * scale;
-
-            return (
-              <group key={index} position={[0, y, 0]} rotation={[0, leaf.angle, 0]}>
-                <mesh
-                  position={[size * 0.55, 0, 0]}
-                  rotation={[0, 0, -tilt]}
-                  scale={[1, 0.18, 0.62]}
-                  castShadow
-                >
-                  <sphereGeometry args={[size * 0.62, 12, 8]} />
-                  <meshStandardMaterial
-                    color={species.color}
-                    roughness={0.7}
-                    metalness={0.02}
-                  />
-                </mesh>
-                {/* Yaprak sapı */}
-                <mesh
-                  position={[size * 0.2, 0, 0]}
-                  rotation={[0, 0, -tilt]}
-                  castShadow
-                >
-                  <cylinderGeometry args={[radius * 0.012, radius * 0.012, size * 0.5, 5]} />
-                  <meshStandardMaterial color="#4a7c3f" roughness={0.9} />
-                </mesh>
-              </group>
-            );
-          })}
-
-          {/* Meyveler — saptan sarkıyor */}
-          {fruiting > 0.05 &&
-            fruits.map((angle, index) => {
-              const r = leafSpan * 0.42;
-              const px = Math.cos(angle) * r;
-              const pz = Math.sin(angle) * r;
-              const py = height * 0.52;
-
-              return (
-                <group key={`f-${index}`} position={[px, py, pz]}>
-                  {/* Sap */}
-                  <mesh position={[0, fruitR * 0.9, 0]} castShadow>
-                    <cylinderGeometry args={[radius * 0.01, radius * 0.01, fruitR * 1.2, 5]} />
-                    <meshStandardMaterial color="#4a7c3f" roughness={0.9} />
-                  </mesh>
-                  {/* Meyve — hafif basık küre, gerçek meyveler tam yuvarlak değil */}
-                  <mesh scale={[1, 0.88, 1]} castShadow>
-                    <sphereGeometry args={[fruitR, 16, 12]} />
-                    <meshStandardMaterial
-                      color={species.color}
-                      roughness={0.35}
-                      metalness={0.04}
-                    />
-                  </mesh>
-                </group>
-              );
-            })}
-        </>
-      )}
-
-      {showLabel && (
-        <Html
-          position={[0, height + radius * 0.45, 0]}
-          center
-          distanceFactor={2.5 * fontScale}
-          className="pointer-events-none select-none whitespace-nowrap rounded bg-black/65 px-1.5 py-0.5 text-[10px] text-white"
-        >
-          {species.icon} {species.name_tr}
-        </Html>
-      )}
-    </group>
-  );
-}
