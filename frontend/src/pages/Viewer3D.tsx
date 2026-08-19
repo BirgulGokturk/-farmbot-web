@@ -61,66 +61,6 @@ function cameraPosition(
 }
 
 /**
- * Shader programlarını ilk çizimden önce, ana iş parçacığını bloklamadan derler.
- *
- * three.js programları `onFirstUse` ile ilk kullanıldıkları anda derler ve
- * sürücünün bağlama (link) işlemini beklerken ana iş parçacığı durur. Performans
- * kaydında bu tek başına 200 ms'lik bir bloklamaydı — panelin toplam Total
- * Blocking Time'ının en büyük kalemi.
- *
- * `compileAsync` aynı işi KHR_parallel_shader_compile uzantısıyla yapar:
- * derlemenin bitip bitmediğini bloklamadan yoklar. Derleme sürerken Canvas
- * `frameloop="never"` ile bekliyor, böylece bloklayan ilk çizim hiç oluşmuyor.
- */
-function ShaderPrewarm({ ready, onReady }: { ready: boolean; onReady: () => void }) {
-  const gl = useThree((state) => state.gl);
-  const scene = useThree((state) => state.scene);
-  const camera = useThree((state) => state.camera);
-  const invalidate = useThree((state) => state.invalidate);
-
-  useEffect(() => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      onReady();
-    };
-
-    /*
-     * Güvenlik ağı: uzantı desteklenmezse, sürücü takılırsa ya da compileAsync
-     * bir şekilde çözülmezse sahne sonsuza kadar boş kalmasın. Kiosk ekranında
-     * hiç açılmayan bir panel, 200 ms'lik bloklamadan çok daha kötü.
-     */
-    const timer = window.setTimeout(finish, 3000);
-    void gl.compileAsync(scene, camera).then(finish, finish);
-
-    return () => {
-      settled = true;
-      window.clearTimeout(timer);
-    };
-  }, [gl, scene, camera, onReady]);
-
-  /*
-   * `never` → `demand` geçişinde ilk kareyi elle istemek gerekiyor; demand
-   * modunda çizim kendiliğinden başlamaz.
-   *
-   * İsteği doğrudan efektin içinden veremiyoruz: React alt bileşenlerin
-   * efektlerini üst bileşenden önce çalıştırıyor, dolayısıyla bu satır Canvas
-   * frameloop'u `demand`e çevirmeden çalışır ve r3f `never` modundaki istekleri
-   * sessizce yutar (invalidate: `if (state.frameloop === 'never') return`).
-   * requestAnimationFrame ile bir sonraki kareye erteleyince tüm efektler —
-   * Canvas'ınki dahil — çoktan bitmiş oluyor.
-   */
-  useEffect(() => {
-    if (!ready) return;
-    const id = requestAnimationFrame(() => invalidate());
-    return () => cancelAnimationFrame(id);
-  }, [ready, invalidate]);
-
-  return null;
-}
-
-/**
  * Bakış açısını kameraya gerçekten uygular.
  *
  * Çözdüğü hata: `<Canvas camera={...}>` prop'u yalnızca **ilk kurulumda**
@@ -191,13 +131,6 @@ export default function Viewer3D() {
   const { data: device } = useActiveDevice();
   const status = useBot((s) => s.status);
   const [panelOpen, setPanelOpen] = useState(false);
-
-  /*
-   * Shader programları hazır olana kadar sahne çizilmiyor — sebebi aşağıda,
-   * ShaderPrewarm'da anlatılıyor.
-   */
-  const [shadersReady, setShadersReady] = useState(false);
-  const markShadersReady = useCallback(() => setShadersReady(true), []);
 
   const stored = readMachineConfig(device?.settings);
   // Kaydetmeden önce de sonucu görebilmek için görünüm ayarları yerel durumda
@@ -290,13 +223,9 @@ export default function Viewer3D() {
                  * yer üretir: sahne ağacı değişince react-three-fiber kendisi,
                  * kamera gezinirken OrbitControls, ve robot hareket ederken
                  * aşağıdaki useFrame (bkz. SETTLE_EPSILON).
-                 *
-                 * Shader'lar derlenene kadar `never`: ilk çizim programların
-                 * derlenmesini beklerse ana iş parçacığını 200 ms bloklıyor.
                  */
-                frameloop={shadersReady ? "demand" : "never"}
+                frameloop="demand"
               >
-                <ShaderPrewarm ready={shadersReady} onReady={markShadersReady} />
                 <Scene
                   points={points ?? []}
                   position={position}
