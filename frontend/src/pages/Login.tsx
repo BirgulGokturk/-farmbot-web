@@ -34,7 +34,10 @@ export default function Login() {
   }
 
   return (
-    <div className="grid min-h-dvh place-items-center px-4 py-10">
+    // `main`: ekran okuyucu kullananlar sayfanın asıl içeriğine doğrudan
+    // atlayabilsin. Panel tarafında AppShell aynı işi görüyor, ama giriş
+    // ekranı AppShell'in dışında kaldığı için burada ayrıca gerekiyor.
+    <main className="grid min-h-dvh place-items-center px-4 py-10">
       <div className="w-full max-w-md">
         <div className="mb-8 flex justify-center">
           <BotLogo />
@@ -135,6 +138,6 @@ export default function Login() {
           </p>
         )}
       </div>
-    </div>
+    </main>
   );
 }
