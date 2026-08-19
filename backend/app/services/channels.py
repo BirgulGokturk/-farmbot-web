@@ -43,6 +43,10 @@ KNOWN_CHANNELS: dict[str, ChannelSpec] = {
     # --- HW-103 (analog + dijital) ---
     "hw103_soil": ChannelSpec("Toprak Nemi", SensorKind.SOIL_MOISTURE, "%", "💧", 0, 100),
     "hw103_rain": ChannelSpec("Yağmur", SensorKind.RAIN, "", "🌧️", 0, 1),
+    # Ham ADC — eşiği ayarlamak için. Yüzde değil, 0–1023 sayaç.
+    "hw103_rain_raw": ChannelSpec(
+        "Yağmur (ham ADC)", SensorKind.GENERIC, "", "📶", 0, 1023
+    ),
     # Ham ADC değeri — yüzde değil. Kalibrasyon (SOIL_DRY / SOIL_WET) bunu
     # izleyerek yapılır, bu yüzden ayrı kanal olarak tutuluyor.
     "hw103_soil_raw": ChannelSpec(

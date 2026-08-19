@@ -32,7 +32,10 @@
 // --- SENSÖR PİN TANIMLAMALARI ---
 #define DHTPIN 2          // Nem ve sıcaklık sensörü D2'ye bağlı
 #define DHTTYPE DHT11     // Elindeki sensör DHT11
-#define YAGMUR_PIN A0     // HW-103 Analog pini
+#define YAGMUR_PIN A0     // HW-103 yağmur sensörünün analog (AO) pini
+// Toprak nemi sensörü henüz yok. Taktığında A1'e bağla ve aşağıdaki
+// TOPRAK_PIN satırını yorumdan çıkar; panelde ayrı bir kanal olarak görünür.
+// #define TOPRAK_PIN A1
 #define SERVO_PIN 9       // SG 5010 Servo pini
 
 // --- NESNELERİ OLUŞTURMA ---
@@ -40,15 +43,17 @@ Adafruit_BMP085 bmp;
 DHT dht(DHTPIN, DHTTYPE);
 Servo tarimServo;
 
-// --- EŞİK DEĞERİ ---
-// HW-103 sensörleri kuruyken 1023'e yakın, su gördüğünde 0'a yakın değer verir.
-// Bu değeri kendi testlerine göre değiştirebilirsin.
+// --- YAĞMUR EŞİĞİ ---
+// HW-103 kuruyken 1023'e yakın, su gördüğünde 0'a yakın değer verir.
+// Doğru eşiği bulmak için: panelde "Yağmur (ham)" grafiğine bak, sensör
+// kuruyken ve üstüne birkaç damla su damlattığında okunan değerlerin
+// ortasını buraya yaz.
 int suEsikDegeri = 600;
 
-// Toprak nemini yüzdeye çevirmek için iki uç. Kalibrasyon:
-//   sensör kuru havadayken okunan değer  -> TOPRAK_KURU
-//   sensör suya batırıldığında okunan     -> TOPRAK_ISLAK
-// Seri Monitör'deki "Yagmur/Nem Seviyesi" değerini kullanarak ayarla.
+// --- TOPRAK NEMİ (sensör takıldığında) ---
+// Kalibrasyon: probu havada tutunca okunan değer -> TOPRAK_KURU,
+// suya batırınca okunan -> TOPRAK_ISLAK. Panelde "Toprak (ham)" grafiğinden
+// okuyup buraya yaz.
 const int TOPRAK_KURU  = 620;
 const int TOPRAK_ISLAK = 260;
 
@@ -110,9 +115,8 @@ void loop() {
     rakim = bmp.readAltitude();           // metre
   }
 
-  // --- HW-103 (YAĞMUR/TOPRAK) OKUMA ---
+  // --- HW-103 YAĞMUR SENSÖRÜ ---
   int yagmurDegeri = analogRead(YAGMUR_PIN);
-  float toprakYuzde = toprakYuzdesi(yagmurDegeri);
 
   // Sensör verilerinde okuma hatası var mı kontrol et
   if (isnan(nem) || isnan(dhtSicaklik)) {
@@ -155,12 +159,16 @@ void loop() {
 
   // --- PANELE GÖNDERİLEN SATIR ---
   // Köprü programı yalnızca bu satırı okur, üsttekileri yok sayar.
-  paneleGonder(nem, dhtSicaklik, bmpSicaklik, basinc, rakim, toprakYuzde, yagmurDegeri);
+  paneleGonder(nem, dhtSicaklik, bmpSicaklik, basinc, rakim, yagmurDegeri);
 
   Serial.println("----------------------------------------");
 }
 
 /** Ham ADC değerini 0–100 arası toprak nemi yüzdesine çevirir. */
+// Toprak nemi yüzdesi. A1'e sensör taktığında `TOPRAK_PIN` tanımını yorumdan
+// çıkar, aşağıdaki iki satırı `loop()` içine ekle ve `paneleGonder`'e ilet:
+//   int toprakHam  = analogRead(TOPRAK_PIN);
+//   float toprakYuzde = toprakYuzdesi(toprakHam);
 float toprakYuzdesi(int ham) {
   long aralik = (long)TOPRAK_KURU - (long)TOPRAK_ISLAK;
   if (aralik == 0) return 0;
@@ -186,8 +194,7 @@ void servoyuAyarla(int aci) {
  * VERI:{"dht_humidity":54.0,"dht_temperature":23.0,...}
  */
 void paneleGonder(float nem, float dhtSic, float bmpSic,
-                  int32_t basincPa, float rakim,
-                  float toprak, int toprakHam) {
+                  int32_t basincPa, float rakim, int yagmurHam) {
   Serial.print("VERI:{");
 
   Serial.print("\"dht_humidity\":");     Serial.print(nem, 1);
@@ -200,10 +207,12 @@ void paneleGonder(float nem, float dhtSic, float bmpSic,
     Serial.print(",\"bmp180_altitude\":");    Serial.print(rakim, 1);
   }
 
-  Serial.print(",\"hw103_soil\":");      Serial.print(toprak, 1);
-  Serial.print(",\"hw103_soil_raw\":");  Serial.print(toprakHam);
-  // HW-103 esigin altindaysa su var demektir
-  Serial.print(",\"hw103_rain\":");      Serial.print(toprakHam < suEsikDegeri ? 1 : 0);
+  // A0'da tek bir yağmur sensörü var. Önceki sürüm bu değeri ayrıca
+  // "hw103_soil" ve "hw103_soil_raw" olarak da gönderiyordu; ortada toprak
+  // sensörü olmadığı için panel yağmur sensörünü toprak nemi diye gösteriyordu.
+  Serial.print(",\"hw103_rain\":");      Serial.print(yagmurHam < suEsikDegeri ? 1 : 0);
+  // Ham değer de gidiyor: eşiği panelden bakarak ayarlayabilmek için
+  Serial.print(",\"hw103_rain_raw\":");  Serial.print(yagmurHam);
   Serial.print(",\"servo_aci\":");       Serial.print(servoAcisi);
 
   Serial.println("}");
