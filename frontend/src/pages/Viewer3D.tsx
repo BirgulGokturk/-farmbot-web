@@ -197,7 +197,14 @@ export default function Viewer3D() {
               }
             >
               <Canvas
-                shadows
+                /*
+                 * `shadows` (yalın) react-three-fiber'da PCFSoftShadowMap
+                 * seçiyor, three.js ise onu kullanımdan kaldırdı ve sessizce
+                 * PCFShadowMap'e düşüyor — konsolda iki uyarı bırakarak.
+                 * "percentage" doğrudan PCFShadowMap demek: görüntü aynı,
+                 * uyarı yok, gelecekte bir sürprizle karşılaşmıyoruz.
+                 */
+                shadows="percentage"
                 camera={{
                   /*
                    * Bakış köşesi kullanıcının tercihi.
