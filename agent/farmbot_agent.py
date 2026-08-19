@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import glob
 import json
 import logging
 import os
@@ -79,12 +80,44 @@ class SerialLink:
         self._serial: serial.Serial | None = None
         self._write_lock = asyncio.Lock()
 
+    def _resolve_port(self) -> str:
+        """Yapılandırılan port yoksa takılı olan seri aygıtı bulur.
+
+        Neden gerekli: Arduino'nun aygıt adı sabit değil. USB'den çıkarılıp
+        takılınca ya da Pi yeniden başlayınca `/dev/ttyUSB0` iken `ttyUSB1`
+        olabiliyor; başka bir USB seri aygıt varsa sıra büsbütün değişiyor.
+        Sabit ada bağlı kalmak, hiçbir şey bozulmadığı hâlde "Arduino
+        görünmüyor" durumuna yol açıyordu.
+
+        Yapılandırılan port duruyorsa ona dokunmuyoruz — otomatik bulma yalnızca
+        o yokken devreye giriyor, yani bilinçli bir tercih sessizce ezilmiyor.
+        """
+        if os.path.exists(self.port):
+            return self.port
+
+        adaylar = sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
+        if not adaylar:
+            raise FileNotFoundError(
+                f"{self.port} yok ve takılı seri aygıt bulunamadı. "
+                "Arduino'nun USB kablosunu ve `ls /dev/ttyUSB* /dev/ttyACM*` çıktısını kontrol edin."
+            )
+
+        secilen = adaylar[0]
+        logger.warning(
+            "%s bulunamadı; bunun yerine %s kullanılıyor (takılı aygıtlar: %s)",
+            self.port, secilen, ", ".join(adaylar),
+        )
+        return secilen
+
     async def open(self) -> None:
+        port = await asyncio.to_thread(self._resolve_port)
+
         def _open() -> serial.Serial:
             # timeout: readline'ın sonsuza kadar beklememesi için
-            return serial.Serial(self.port, self.baudrate, timeout=2)
+            return serial.Serial(port, self.baudrate, timeout=2)
 
         self._serial = await asyncio.to_thread(_open)
+        self.port = port
         # Arduino seri port açılınca resetlenir; açılış mesajını bekle
         await asyncio.sleep(2.5)
         logger.info("Arduino bağlandı: %s @ %d", self.port, self.baudrate)
