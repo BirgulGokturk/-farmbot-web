@@ -45,11 +45,19 @@ export default function Dashboard() {
     enabled: Boolean(deviceId),
   });
 
-  const { data: sensors } = useQuery({
+  const { data: allSensors } = useQuery({
     queryKey: ["sensors", deviceId],
     queryFn: () => api.hardware.sensors(deviceId!),
     enabled: Boolean(deviceId),
   });
+
+  // Fiziksel olarak takılı olmayanlar panoda hiç görünmesin. Arduino, sensör
+  // bağlı olmayan analog pini de okuyor ve boştaki pin gürültü üretiyor;
+  // "Yağmur" satırının sensör takılı değilken görünmesinin sebebi buydu.
+  const sensors = useMemo(
+    () => (allSensors ?? []).filter((sensor) => sensor.installed),
+    [allSensors],
+  );
 
   // Sensör kartları yalnızca WebSocket'ten gelen canlı ölçümlerle besleniyordu.
   // Sayfa yeni açıldığında henüz mesaj gelmediği için hepsi "—" görünüyordu ve
@@ -222,7 +230,7 @@ export default function Dashboard() {
               </Link>
             }
           />
-          {sensors?.length ? (
+          {sensors.length ? (
             <ul className="space-y-2.5">
               {sensors.map((sensor) => (
                 <SensorRow

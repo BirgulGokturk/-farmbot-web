@@ -69,7 +69,9 @@ export function AlertRules() {
 
       {showForm && (
         <RuleForm
-          sensors={sensors ?? []}
+          // Takılı olmayan sensöre kural kurulamasın: boştaki pinin gürültüsü
+          // eşiği aşıp durmadan sahte uyarı üretirdi.
+          sensors={(sensors ?? []).filter((sensor) => sensor.installed)}
           onCreated={() => {
             setShowForm(false);
             void queryClient.invalidateQueries({ queryKey: ["alert-rules", deviceId] });

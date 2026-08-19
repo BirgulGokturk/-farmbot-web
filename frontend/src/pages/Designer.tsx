@@ -121,7 +121,10 @@ export default function Designer() {
    * indiğinde farklı okuyor — haritası anlamlı olan tek ölçüm bu.
    */
   const heatmapSensors = useMemo(
-    () => (sensors ?? []).filter((sensor) => sensor.kind === "soil_moisture"),
+    () =>
+      (sensors ?? []).filter(
+        (sensor) => sensor.kind === "soil_moisture" && sensor.installed,
+      ),
     [sensors],
   );
 
