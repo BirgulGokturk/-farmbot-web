@@ -84,6 +84,17 @@ services:
     buildCommand: npm ci && npm run build
     staticPublishPath: ./dist
     envVars:
+      # Node sürümü AÇIKÇA sabitleniyor.
+      #
+      # Vite 8 en az Node 20.19 istiyor; daha eskisinde derleme hata veriyor.
+      # Render'ın varsayılanı bunun altında kalırsa API sorunsuz yayına
+      # girerken statik site sessizce eski sürümde takılı kalıyor — belirtisi
+      # yalnızca "panel güncellenmedi" oluyor ve sebebi derleme kaydına
+      # bakmadan anlaşılmıyor. Bu sürümü Raspberry Pi'de bu projeyi derleyerek
+      # doğruladık.
+      - key: NODE_VERSION
+        value: 24.19.0
+
       # API adresi açıkça yazılır (yukarıdaki CORS notuyla aynı sebep).
       # İstemci `/api/v1` son ekini ve WebSocket adresini bundan türetir.
       - key: VITE_API_URL
