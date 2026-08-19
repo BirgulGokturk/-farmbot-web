@@ -252,6 +252,7 @@ async def push_machine_config(device: Device) -> bool:
             "payload": {
                 "axes": machine["axes"],
                 "limits_enabled": machine["limits_enabled"],
+                "travel": machine["travel"],
             },
         },
     )
@@ -395,6 +396,7 @@ async def agent_socket(websocket: WebSocket, token: str | None = None) -> None:
             "payload": {
                 "axes": machine["axes"],
                 "limits_enabled": machine["limits_enabled"],
+                "travel": machine["travel"],
             },
         }
     )

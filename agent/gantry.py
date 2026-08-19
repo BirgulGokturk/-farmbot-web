@@ -38,6 +38,14 @@ AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 COMMAND_TIMEOUT_SECONDS = 180.0
 
 
+# İki konumu "aynı" saymak için tolerans (mm).
+#
+# Sıfırla karşılaştırmak işe yaramıyor: enkoder okuması her turda birkaç
+# yüzde milimetre oynuyor ve tam eşitlik neredeyse hiç tutmuyor. Tolerans
+# olmadan robot zaten bulunduğu yere gitmek için gereksiz adımlar atardı.
+POSITION_EPSILON = 0.5
+
+
 class GantryUnavailable(Exception):
     """Gantry Studio çalışmıyor ya da yanıt vermiyor."""
 
@@ -304,6 +312,17 @@ class GantryClient:
         # Son durum okumasının gidiş-dönüş süresi (ms)
         self.last_latency_ms: float | None = None
 
+        # --- Güvenli geçiş yüksekliği ---
+        # Uç aşağıdayken yatayda gitmek yoldaki bitkileri biçer. Bu yüzden her
+        # X/Y hareketinden önce Z buraya çekiliyor, varılınca hedefe iniliyor.
+        #
+        # `None` = koruma kapalı ve hareket bugünküyle birebir aynı. Bir sayı
+        # uydurmuyoruz: hangi yönün "yukarı" olduğu makineye göre değişiyor
+        # (Z yönü -1, ev 440 mm) ve yanlış bir varsayılan her harekette ucu
+        # toprağa sürtmek demek olurdu. Kullanıcı panelden girene kadar kapalı.
+        self.safe_z: float | None = None
+        self.travel_guard: bool = True
+
     async def close(self) -> None:
         await self._http.aclose()
 
@@ -418,15 +437,79 @@ class GantryClient:
         *,
         moving: list[str] | None = None,
     ) -> None:
-        """Güvenli rotayla hedefe git (Z kaldır → yatayda git → indir).
+        """Güvenli rotayla hedefe git: Z'yi kaldır → yatayda git → indir.
 
         x/y/z **kullanıcı milimetresi**; sınır kontrolü ve makine birimine
         çevirme burada yapılıyor. `moving`, hız seçiminde hangi eksenlerin
         gerçekten hareket ettiğini bildirir.
+
+        Koruma neden burada:
+          Uygulanabilmesi için robotun **o an nerede olduğunu** bilmek gerekiyor
+          ve bunu yalnızca bu katman biliyor. Buraya koyunca komutu kimin
+          ürettiği fark etmiyor — tasarımcının "Git" düğmesi, sulama, ekim,
+          diziler ve ham komutlar aynı korumadan geçiyor.
         """
         for axis, value in (("x", x), ("y", y), ("z", z)):
             self.calibration.check_limits(axis, value)
 
+        if not self._guard_active():
+            await self._raw_move(x, y, z, speed, moving)
+            return
+
+        safe_z = float(self.safe_z)  # _guard_active None olmadığını doğruladı
+        current = await self.position()
+        if current is None:
+            # Nerede olduğumuzu bilmeden Z'yi oynatmak kör hareket olurdu;
+            # korumasız ama beklenen tek adımı göndermek daha az riskli.
+            logger.warning("Konum okunamadı; güvenli yükseklik atlanıyor")
+            await self._raw_move(x, y, z, speed, moving)
+            return
+
+        yatay = abs(current[0] - x) > POSITION_EPSILON or abs(current[1] - y) > POSITION_EPSILON
+
+        if yatay:
+            # 1) Ucu **olduğu yerde** kaldır. X/Y'yi mevcut değerinde tutuyoruz:
+            #    hedefe doğru kaymaya başlarsa çukurdan çıkarken toprağı yarar.
+            if abs(current[2] - safe_z) > POSITION_EPSILON:
+                logger.info("Güvenli yüksekliğe çekiliyor: Z %.1f mm", safe_z)
+                await self._raw_move(current[0], current[1], safe_z, speed, ["z"])
+
+            # 2) Yatayda git — artık yol boyunca uç yukarıda.
+            #    Hız için yalnızca X/Y'ye bakılıyor: bu adımda Z durgun ve
+            #    Z'nin (genelde daha düşük) hız tavanı yolu yavaşlatmamalı.
+            await self._raw_move(x, y, safe_z, speed, ["x", "y"])
+
+        # 3) Hedef yüksekliğe in (zaten oradaysak adım atlanır)
+        if abs(z - safe_z) > POSITION_EPSILON or not yatay:
+            await self._raw_move(x, y, z, speed, ["z"] if yatay else moving)
+
+    def _guard_active(self) -> bool:
+        """Güvenli geçiş uygulanacak mı?
+
+        Yükseklik sınırların dışındaysa uygulamıyoruz: koruma olsun derken
+        her hareketi `OutOfRange` ile reddetmek makineyi tamamen kilitlerdi.
+        """
+        if self.safe_z is None or not self.travel_guard:
+            return False
+        try:
+            self.calibration.check_limits("z", float(self.safe_z))
+        except OutOfRange:
+            logger.warning(
+                "Güvenli yükseklik (%.1f mm) Z sınırlarının dışında; koruma atlanıyor",
+                self.safe_z,
+            )
+            return False
+        return True
+
+    async def _raw_move(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        speed: float,
+        moving: list[str] | None = None,
+    ) -> None:
+        """Tek adımlık hareket — güvenli rota bunu parçalar hâlinde çağırıyor."""
         # Hedef **milimetre** olarak gidiyor: Gantry Studio'nun `/api/cmd`
         # arayüzü mm alıp count'a kendi çeviriyor (PLC_BRIEF.md §6). Burada bir
         # kez daha çevirseydik dönüşüm iki kez uygulanırdı.
@@ -439,12 +522,34 @@ class GantryClient:
     async def go_home(self, axis: str = "all") -> None:
         """Eve dön.
 
-        `all` için sıralama Z → X → Y. Önce Z'yi yukarı almazsak alet toprakta
+        `all` için sıralama Z → X → Y: önce Z'yi yukarı almazsak alet toprakta
         sürünerek yatay harekete başlar.
+
+        Yalnızca X ya da Y eve çağrıldığında bu sıralama devreye girmiyor —
+        o yüzden önce ucu güvenli yüksekliğe çekiyoruz. Kullanıcının "X'i eve
+        gönder" demesi, yoldaki bitkileri feda etmeyi göze aldığı anlamına
+        gelmiyor.
         """
+        if axis in {"x", "y"}:
+            await self.retract_to_safe()
+
         order = [2, 0, 1] if axis == "all" else [AXIS_INDEX[axis]]
         for index in order:
             await self.command({"cmd": "gohome", "axis": index})
+
+    async def retract_to_safe(self) -> None:
+        """Ucu, X/Y'yi kıpırdatmadan güvenli yüksekliğe çeker."""
+        if not self._guard_active():
+            return
+        current = await self.position()
+        if current is None:
+            logger.warning("Konum okunamadı; uç kaldırılamadı")
+            return
+        safe_z = float(self.safe_z)
+        if abs(current[2] - safe_z) <= POSITION_EPSILON:
+            return
+        logger.info("Güvenli yüksekliğe çekiliyor: Z %.1f mm", safe_z)
+        await self._raw_move(current[0], current[1], safe_z, 20.0, ["z"])
 
     async def jog(self, axis: str, forward: bool, value: bool) -> None:
         await self.command(

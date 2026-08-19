@@ -451,6 +451,23 @@ class Agent:
                     logger.warning(
                         "Yumuşak sınırlar KAPALI — hedefler denetlenmeden gönderilecek"
                     )
+
+                # Güvenli geçiş yüksekliği: X/Y hareketinden önce uç buraya
+                # çekiliyor. Girilmemişse koruma kapalı kalıyor (bkz. gantry.py).
+                travel = payload.get("travel") or {}
+                self.gantry.safe_z = travel.get("safe_z_mm")
+                self.gantry.travel_guard = travel.get("enabled") is not False
+                if self.gantry.safe_z is None:
+                    logger.warning(
+                        "Güvenli geçiş yüksekliği tanımsız — uç, yatay harekette "
+                        "bulunduğu yükseklikte kalacak. Ayarlar → Hareket'ten girin."
+                    )
+                else:
+                    logger.info(
+                        "Güvenli geçiş yüksekliği: Z %.1f mm (%s)",
+                        self.gantry.safe_z,
+                        "açık" if self.gantry.travel_guard else "kapalı",
+                    )
             return
 
         if kind != "rpc":

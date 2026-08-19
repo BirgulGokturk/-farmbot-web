@@ -51,6 +51,63 @@ TOOL_ZONE_DEFAULTS: dict[str, Any] = {
     "slots": [],        # [{"name": ..., "x":, "y":, "z":}]
 }
 
+# --------------------------------------------------------------------------- #
+# Ekim alanı — yatağın kenarıyla ekilebilir toprağın başladığı yer aynı değil
+# --------------------------------------------------------------------------- #
+#
+# Yatak ölçüsü (`bed_width_mm` / `bed_length_mm`) makinenin gidebildiği alan.
+# Ekilebilir toprak ise onun içinde daha küçük bir dikdörtgen: kenarda profil,
+# kablo kanalı, saksı duvarı gibi boşluklar var. Tohumu oraya bırakırsak
+# tohum toprağa değil metale düşer.
+#
+# Bu yüzden ekim alanını ayrı tutuyoruz. `None` = "o kenarda sınır yok",
+# yani yatağın kendi ölçüsü geçerli — ölçüm yapılmamış bir makinede davranış
+# bugünküyle aynı kalsın diye.
+PLANTING_AREA_DEFAULTS: dict[str, Any] = {
+    "x_min_mm": None,
+    "x_max_mm": None,
+    "y_min_mm": None,
+    "y_max_mm": None,
+}
+
+# --------------------------------------------------------------------------- #
+# Güvenli geçiş yüksekliği
+# --------------------------------------------------------------------------- #
+#
+# Uç aşağıdayken yatayda gitmek, yoldaki her bitkiyi biçer. Bu yüzden her
+# X/Y hareketinden önce Z güvenli yüksekliğe çekilir, varılınca indirilir.
+#
+# `safe_z_mm` neden `None` başlıyor: hangi yönün "yukarı" olduğu makineye
+# göre değişiyor (Z yönü -1, ev 440 mm). Yanlış bir varsayılan, her harekette
+# ucu toprağa sürtmek demek olurdu. Kullanıcı Z'yi elle güvenli bir yüksekliğe
+# getirip "buradan al" diyene kadar bu koruma çalışmıyor ve arayüz bunu
+# açıkça söylüyor — sessizce yanlış davranmaktansa açıkça kapalı olsun.
+TRAVEL_DEFAULTS: dict[str, Any] = {
+    "enabled": True,
+    "safe_z_mm": None,
+}
+
+# --------------------------------------------------------------------------- #
+# Vakumlu tohum ucu
+# --------------------------------------------------------------------------- #
+#
+# Çalışma sırası: uç tohum tepsisine iner, vakum açılır, tohum uca yapışır,
+# uç kalkar, hedefe gider, iner, vakum kapanır ve tohum çukura düşer.
+#
+# Bekleme süreleri neden ayarlanabilir: vakumun tohumu tutması da bırakması da
+# anlık değil. Pompanın gücüne ve tohumun ağırlığına göre değişiyor; sahada
+# denemeden doğru değer bilinemez.
+SEEDER_DEFAULTS: dict[str, Any] = {
+    "enabled": False,
+    "vacuum_pin": 9,
+    "tray_x_mm": 0.0,      # tohum tepsisinin konumu
+    "tray_y_mm": 0.0,
+    "tray_z_mm": 0.0,      # tepsideki tohuma değecek yükseklik
+    "pick_dwell_ms": 800,   # vakum açıkken tepside bekleme
+    "release_dwell_ms": 500,  # vakum kapandıktan sonra çukurda bekleme
+    "default_depth_mm": 15,   # türün kendi derinliği yoksa
+}
+
 VIEWER_DEFAULTS: dict[str, Any] = {
     "camera_angle": "on",  # bakış yönü
     "robot_scale": 1.0,   # gantry gövdesinin boyut çarpanı
@@ -186,6 +243,71 @@ def normalize_viewer(raw: Any) -> dict[str, Any]:
     }
 
 
+def _optional_number(
+    value: Any, *, span: tuple[float, float] = (-1e6, 1e6)
+) -> float | None:
+    """Boş bırakılabilen sayı: geçersiz ya da boşsa `None` (= sınır yok)."""
+    if value is None or value == "":
+        return None
+    parsed = _number(value, float("nan"), span=span)
+    return None if parsed != parsed else parsed
+
+
+def normalize_planting_area(raw: Any) -> dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    area = {key: _optional_number(source.get(key)) for key in PLANTING_AREA_DEFAULTS}
+
+    # Ters girilmişse düzelt; aksi hâlde ekilebilir alan boş küme olur ve
+    # rastgele ekim "yer bulamadım" deyip durur, sebebi de anlaşılmaz.
+    for low, high in (("x_min_mm", "x_max_mm"), ("y_min_mm", "y_max_mm")):
+        if area[low] is not None and area[high] is not None and area[low] > area[high]:
+            area[low], area[high] = area[high], area[low]
+
+    return area
+
+
+def normalize_travel(raw: Any) -> dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    return {
+        "enabled": source.get("enabled") is not False,
+        "safe_z_mm": _optional_number(source.get("safe_z_mm")),
+    }
+
+
+def normalize_seeder(raw: Any) -> dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    return {
+        "enabled": bool(source.get("enabled", SEEDER_DEFAULTS["enabled"])),
+        "vacuum_pin": int(_number(source.get("vacuum_pin"), 9.0, span=(0, 255))),
+        "tray_x_mm": _number(source.get("tray_x_mm"), 0.0, span=(-1e6, 1e6)),
+        "tray_y_mm": _number(source.get("tray_y_mm"), 0.0, span=(-1e6, 1e6)),
+        "tray_z_mm": _number(source.get("tray_z_mm"), 0.0, span=(-1e6, 1e6)),
+        "pick_dwell_ms": int(_number(source.get("pick_dwell_ms"), 800.0, span=(0, 60000))),
+        "release_dwell_ms": int(
+            _number(source.get("release_dwell_ms"), 500.0, span=(0, 60000))
+        ),
+        "default_depth_mm": _number(source.get("default_depth_mm"), 15.0, span=(0, 1000)),
+    }
+
+
+def planting_bounds(device: Any, settings: Any = None) -> tuple[float, float, float, float]:
+    """Ekilebilir dikdörtgen: (x_min, x_max, y_min, y_max).
+
+    Ayarlanmamış kenarlar yatağın kendi ölçüsüne düşer, böylece ölçüm
+    yapılmamış bir makinede tüm yatak ekilebilir sayılır.
+    """
+    area = normalize(settings if settings is not None else device.settings)["planting_area"]
+    x_min = area["x_min_mm"] if area["x_min_mm"] is not None else 0.0
+    y_min = area["y_min_mm"] if area["y_min_mm"] is not None else 0.0
+    x_max = area["x_max_mm"] if area["x_max_mm"] is not None else float(device.bed_width_mm)
+    y_max = area["y_max_mm"] if area["y_max_mm"] is not None else float(device.bed_length_mm)
+
+    # Ekim alanı yatağın dışına taşamaz: robot oraya zaten gidemiyor
+    x_min, x_max = max(0.0, x_min), min(float(device.bed_width_mm), x_max)
+    y_min, y_max = max(0.0, y_min), min(float(device.bed_length_mm), y_max)
+    return x_min, x_max, y_min, y_max
+
+
 def normalize(settings: Any) -> dict[str, Any]:
     """`device.settings` sözlüğünü eksiksiz ve güvenli hâle getirir.
 
@@ -201,6 +323,9 @@ def normalize(settings: Any) -> dict[str, Any]:
     source["limits_enabled"] = source.get("limits_enabled") is not False
     source["tool_zone"] = normalize_tool_zone(source.get("tool_zone"))
     source["viewer"] = normalize_viewer(source.get("viewer"))
+    source["planting_area"] = normalize_planting_area(source.get("planting_area"))
+    source["travel"] = normalize_travel(source.get("travel"))
+    source["seeder"] = normalize_seeder(source.get("seeder"))
     return source
 
 

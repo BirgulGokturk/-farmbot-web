@@ -130,6 +130,54 @@ def water_at(
     ]
 
 
+# --------------------------------------------------------------------------- #
+# Vakumlu tohum ekimi
+# --------------------------------------------------------------------------- #
+#
+# Buradaki adımlar düz `move_absolute` üretiyor; "önce Z'yi kaldır" korumasını
+# eklemiyoruz. Sebebi: korumayı uygulayabilmek için robotun **o an nerede
+# olduğunu** bilmek gerekiyor ve bunu yalnızca ajan biliyor. Bu yüzden koruma
+# ajanda, yani makineye açılan son kapıda uygulanıyor (agent/farmbot_agent.py).
+#
+# Böylece koruma tek bir yerde duruyor ve komutu kimin ürettiğinden bağımsız
+# olarak geçerli oluyor: tasarımcının "Git" düğmesi, sulama, ekim, diziler ve
+# eve dönüş — hepsi aynı korumadan geçiyor.
+
+def sow_at(
+    x: float,
+    y: float,
+    soil_z: float,
+    depth_mm: float,
+    *,
+    tray: tuple[float, float, float],
+    vacuum_pin: int = 9,
+    pick_dwell_ms: int = 800,
+    release_dwell_ms: int = 500,
+    speed: int = 100,
+) -> list[dict[str, Any]]:
+    """Vakumlu uçla tek tohum ek.
+
+    Tepsiden al → hedefe götür → çukura bırak. Adımlar tek RPC gövdesi olarak
+    gidiyor; robot sırayla uyguluyor ve arada başka komut araya giremiyor —
+    yarı yolda kalan bir ekim, ucunda tohum asılı bir robot bırakırdı.
+
+    `depth_mm` toprak yüzeyinden **aşağı** ölçülüyor, bu yüzden çıkarılıyor:
+    yüzey Z'si 0 ve derinlik 15 ise tohum -15'e bırakılıyor.
+    """
+    tray_x, tray_y, tray_z = tray
+    return [
+        # 1) Tohum tepsisine in ve tohumu vakumla al
+        move_absolute(tray_x, tray_y, tray_z, speed),
+        write_pin(vacuum_pin, 1, 0),
+        wait(pick_dwell_ms),
+        # 2) Tohum uçta asılıyken hedefe git ve çukura indir
+        move_absolute(x, y, soil_z - depth_mm, speed),
+        # 3) Vakumu kes; tohum düşsün diye biraz bekle
+        write_pin(vacuum_pin, 0, 0),
+        wait(release_dwell_ms),
+    ]
+
+
 def wait(milliseconds: int) -> dict[str, Any]:
     return {"kind": "wait", "args": {"milliseconds": milliseconds}}
 
