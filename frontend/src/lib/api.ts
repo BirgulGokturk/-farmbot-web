@@ -25,6 +25,7 @@ import type {
   Page,
   Peripheral,
   PlantSpecies,
+  PairingCode,
   Point,
   ScatterResult,
   PointCreate,
@@ -379,6 +380,9 @@ export const api = {
       request<AgentTokenResponse>(`/devices/${deviceId}/agent-token`, { method: "POST" }),
     revokeToken: (deviceId: string) =>
       request<AgentStatus>(`/devices/${deviceId}/agent-token`, { method: "DELETE" }),
+    /** Kısa ömürlü eşleştirme kodu — 56 karakterlik token'ı elle taşımaya gerek kalmasın. */
+    createPairingCode: (deviceId: string) =>
+      request<PairingCode>(`/devices/${deviceId}/pairing-code`, { method: "POST" }),
   },
 
   alerts: {

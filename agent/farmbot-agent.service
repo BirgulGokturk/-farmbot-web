@@ -7,12 +7,19 @@
 #
 # TOKEN BURADA DEĞİL
 # ------------------
-# Cihaz token'ı ayrı bir dosyada (/etc/farmbot/agent.env) tutuluyor. Sebebi:
-# token'ı yenilemek eskiden bu birim dosyasını baştan yazmayı gerektiriyordu
-# ve her yazışta satır sonu / kopyalama hatası riski vardı — bir kez CRLF ile
-# kaydedildiğinde token'ın sonuna görünmez bir karakter yapışıp sunucu
-# tarafında anlaşılmaz bir 403'e dönüşüyordu. Artık yenileme tek satırlık bir
-# dosyayı değiştirmekten ibaret; bu dosyaya bir daha dokunmak gerekmiyor.
+# Cihaz token'ı ayrı bir dosyada tutuluyor ve dosya **ajanın kendi
+# yazabildiği** bir yerde duruyor (~/.config/farmbot/agent.env).
+#
+# İki şeyi mümkün kılıyor:
+#   * Eşleştirme: `farmbot_agent.py --esles ABCD-1234` token'ı alıp oraya
+#     kendisi yazıyor; 56 karakterlik diziyi elle taşımak gerekmiyor.
+#   * Otomatik yenileme: ajan token eskiyince yenisini alıp aynı dosyaya
+#     yazıyor, insan eli değmiyor.
+#
+# Eskiden token bu birim dosyasının içindeydi ve her yenileme onu baştan
+# yazmayı gerektiriyordu; bir kez CRLF ile kaydedildiğinde token'ın sonuna
+# görünmez bir karakter yapışıp anlaşılması bir gün süren bir 403'e
+# dönüşüyordu.
 
 [Unit]
 Description=FarmBot köprü ajanı (Arduino -> bulut)
@@ -34,10 +41,12 @@ Environment=FARMBOT_BAUD=9600
 Environment=FARMBOT_GANTRY_URL=http://localhost:8091
 Environment=FARMBOT_API_URL=https://farmbot-api.onrender.com
 
-# Token buradan okunuyor. Dosya yoksa servis başlamasın istemiyoruz —
-# baştaki `-` "yoksa görmezden gel" demek; ajan zaten token'sız çalışamadığını
-# açıkça söylüyor ve bu hâli teşhis etmesi daha kolay.
-EnvironmentFile=-/etc/farmbot/agent.env
+# Token buradan okunuyor. Baştaki `-` "dosya yoksa görmezden gel" demek:
+# henüz eşleşmemiş bir kurulumda servis yine de açılsın ve günlüğe nasıl
+# eşleşileceğini yazsın — açılmayan bir servisin sebebini bulmak daha zor.
+#
+# DÜZENLEYİN: `pi` yerine kendi kullanıcı adınız.
+EnvironmentFile=-/home/pi/.config/farmbot/agent.env
 
 # Ajan çökerse ya da Arduino çıkarılırsa kendiliğinden toparlansın
 Restart=always

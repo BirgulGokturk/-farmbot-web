@@ -15,7 +15,7 @@ import asyncio
 import logging
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from time import monotonic
 
 from fastapi import (
@@ -41,9 +41,13 @@ from app.models import Device, Image, Sensor, SensorReading
 from app.schemas.agent import (
     AgentIngestRequest,
     AgentIngestResult,
+    AgentPairRequest,
+    AgentPairResponse,
     AgentPhotoResult,
-    AgentTokenResponse,
+    AgentRotateResponse,
     AgentStatusRead,
+    AgentTokenResponse,
+    PairingCodeResponse,
 )
 from app.api.v1.telemetry import PHOTO_RETENTION
 from app.services import machine_config
@@ -71,10 +75,7 @@ TOKEN_PREFIX = "fbt"
 )
 async def create_agent_token(device: OwnedDevice, db: DbSession) -> AgentTokenResponse:
     """Yeni bir ajan token'ı üretir. Önceki token geçersiz olur."""
-    raw = f"{TOKEN_PREFIX}_{str(device.id)[:8]}_{secrets.token_urlsafe(32)}"
-
-    device.agent_token_hash = hash_password(raw)
-    device.agent_token_created_at = datetime.now(timezone.utc)
+    raw = _issue_token(device)
     await db.commit()
 
     return AgentTokenResponse(
@@ -82,6 +83,119 @@ async def create_agent_token(device: OwnedDevice, db: DbSession) -> AgentTokenRe
         created_at=device.agent_token_created_at,
         note="Bu token yalnızca şimdi gösterilir. Kaybederseniz yenisini üretin.",
     )
+
+
+# --------------------------------------------------------------------------- #
+# Eşleştirme kodu
+# --------------------------------------------------------------------------- #
+#
+# Neden var: token 56 karakter ve panelden Pi'ye elle taşınıyordu. Her taşıma
+# bir kopyalama riski; bir kez CRLF ile kaydedilen birim dosyası token'ın
+# sonuna görünmez bir karakter ekleyip anlaşılması bir gün süren bir 403'e yol
+# açtı. Kısa bir kod hem yazılabilir hem de ajan kalıcı token'ı kendi dosyasına
+# kendisi yazdığı için elle düzenleme tamamen ortadan kalkıyor.
+
+# Karışması kolay harfler (0/O, 1/I/L) alfabede yok: kod ekrandan okunup elle
+# yazılacak, "sıfır mı O mu" sorusu çıkmasın.
+PAIRING_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+PAIRING_LENGTH = 8
+PAIRING_TTL_MINUTES = 10
+# Kod kısa olduğu için deneme sayısı da sınırlı olmalı; aksi hâlde 10 dakika
+# boyunca kaba kuvvet denenebilirdi.
+PAIRING_MAX_ATTEMPTS = 10
+
+# Yenilenen token'ın eskisi ne kadar geçerli kalsın (bkz. models/device.py)
+TOKEN_GRACE = timedelta(hours=48)
+
+
+def _new_pairing_code() -> str:
+    ham = "".join(secrets.choice(PAIRING_ALPHABET) for _ in range(PAIRING_LENGTH))
+    # Dört dörtlük gruplama: ekrandan okurken yer kaybetmemek için
+    return f"{ham[:4]}-{ham[4:]}"
+
+
+def _issue_token(device: Device) -> str:
+    """Cihaza yeni bir token verir; öncekini hoşgörü penceresine alır."""
+    raw = f"{TOKEN_PREFIX}_{str(device.id)[:8]}_{secrets.token_urlsafe(32)}"
+    now = datetime.now(timezone.utc)
+
+    device.agent_token_previous_hash = device.agent_token_hash
+    device.agent_token_rotated_at = now if device.agent_token_hash else None
+    device.agent_token_hash = hash_password(raw)
+    device.agent_token_created_at = now
+    return raw
+
+
+@router.post(
+    "/devices/{device_id}/pairing-code",
+    response_model=PairingCodeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_pairing_code(device: OwnedDevice, db: DbSession) -> PairingCodeResponse:
+    """Panelde gösterilecek kısa ömürlü eşleştirme kodu üretir."""
+    code = _new_pairing_code()
+    expires = datetime.now(timezone.utc) + timedelta(minutes=PAIRING_TTL_MINUTES)
+
+    device.pairing_code_hash = hash_password(code)
+    device.pairing_code_expires_at = expires
+    device.pairing_attempts = 0
+    await db.commit()
+
+    return PairingCodeResponse(
+        code=code,
+        expires_at=expires,
+        note=(
+            f"Kod {PAIRING_TTL_MINUTES} dakika geçerli ve tek kullanımlık. "
+            "Raspberry Pi'de: farmbot_agent.py --esles <kod>"
+        ),
+    )
+
+
+@router.post("/agent/pair", response_model=AgentPairResponse)
+async def pair_agent(payload: AgentPairRequest, db: DbSession) -> AgentPairResponse:
+    """Ajanın kodu kalıcı token'la takas ettiği uç.
+
+    Kullanıcı oturumu istemiyor — ajanın zaten oturumu yok. Güvenliği kodun
+    kısa ömrü, tek kullanımlığı ve deneme sınırı sağlıyor.
+    """
+    kod = payload.code.strip().upper()
+    now = datetime.now(timezone.utc)
+
+    gecersiz = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Eşleştirme kodu geçersiz ya da süresi dolmuş. Panelden yeni kod üretin.",
+    )
+
+    result = await db.execute(
+        select(Device).where(Device.pairing_code_hash.is_not(None))
+    )
+    for device in result.scalars().all():
+        son = device.pairing_code_expires_at
+        # SQLite saat dilimi saklamıyor; naive gelen değeri UTC varsayıyoruz
+        if son is not None and son.tzinfo is None:
+            son = son.replace(tzinfo=timezone.utc)
+        if son is None or son < now:
+            continue
+        if device.pairing_attempts >= PAIRING_MAX_ATTEMPTS:
+            continue
+        if not verify_password(kod, device.pairing_code_hash or ""):
+            # Yanlış deneme de sayılıyor: sayaç olmadan kod kaba kuvvetle
+            # bulunabilirdi
+            device.pairing_attempts += 1
+            await db.commit()
+            continue
+
+        raw = _issue_token(device)
+        # Kod tek kullanımlık: takas edildiği anda sönüyor
+        device.pairing_code_hash = None
+        device.pairing_code_expires_at = None
+        device.pairing_attempts = 0
+        await db.commit()
+
+        logger.info("Ajan eşleştirildi: %s", device.id)
+        return AgentPairResponse(device_id=device.id, device_name=device.name, token=raw)
+
+    raise gecersiz
 
 
 @router.delete("/devices/{device_id}/agent-token", response_model=AgentStatusRead)
@@ -139,8 +253,33 @@ async def authenticate_agent(
             continue
         if verify_password(token, device.agent_token_hash or ""):
             return device
+        if _previous_token_valid(device, token):
+            # Yenileme sırasında ajan yeni token'ı diskine yazamadan çökmüş
+            # olabilir. Eskisini bir süre kabul etmek, robotun kendini
+            # dışarıda bırakıp Pi'ye fiziksel erişim gerektirmesini önlüyor.
+            logger.warning(
+                "Cihaz %s hoşgörü penceresindeki eski token'ı kullanıyor; "
+                "ajan yeni token'ı kaydedememiş olabilir.",
+                device.id,
+            )
+            return device
 
     raise unauthorized
+
+
+def _previous_token_valid(device: Device, token: str) -> bool:
+    """Yenilemeden önceki token hâlâ kabul edilir mi?"""
+    if not device.agent_token_previous_hash or device.agent_token_rotated_at is None:
+        return False
+
+    rotated = device.agent_token_rotated_at
+    # SQLite saat dilimi saklamıyor; naive gelen değeri UTC varsayıyoruz
+    if rotated.tzinfo is None:
+        rotated = rotated.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - rotated > TOKEN_GRACE:
+        return False
+
+    return verify_password(token, device.agent_token_previous_hash)
 
 
 async def current_agent_device(
@@ -148,6 +287,24 @@ async def current_agent_device(
     x_device_token: str | None = Header(default=None, alias="X-Device-Token"),
 ) -> Device:
     return await authenticate_agent(db, (x_device_token or "").strip() or None)
+
+
+@router.post("/agent/rotate-token", response_model=AgentRotateResponse)
+async def rotate_agent_token(
+    db: DbSession, device: Device = Depends(current_agent_device)
+) -> AgentRotateResponse:
+    """Ajanın kendi token'ını yenilediği uç.
+
+    Eski token `TOKEN_GRACE` süresince kabul edilmeye devam ediyor: ajan yeni
+    token'ı diskine yazamadan çökerse kendini dışarıda bırakmasın.
+    """
+    raw = _issue_token(device)
+    await db.commit()
+    logger.info("Ajan token'ı yenilendi: %s", device.id)
+    return AgentRotateResponse(
+        token=raw,
+        previous_valid_until=datetime.now(timezone.utc) + TOKEN_GRACE,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -258,9 +415,20 @@ def _agent_config(device: Device, machine: dict) -> dict:
     ve ikisinin farklı davranması, "panelde değiştirdim ama robot eskisini
     kullanıyor" gibi bulunması zor bir hataya yol açardı.
     """
+    # Token kaç günlük: ajan buna bakıp gerekirse kendini yeniliyor. Yaşı
+    # sunucudan söylüyoruz çünkü ajan token'ın ne zaman üretildiğini bilmiyor
+    # ve yeniden başlatıldığında kendi saydığı süre sıfırlanırdı.
+    olusturma = device.agent_token_created_at
+    yas_gun: float | None = None
+    if olusturma is not None:
+        if olusturma.tzinfo is None:
+            olusturma = olusturma.replace(tzinfo=timezone.utc)
+        yas_gun = (datetime.now(timezone.utc) - olusturma).total_seconds() / 86400
+
     return {
         "axes": machine["axes"],
         "limits_enabled": machine["limits_enabled"],
+        "token_age_days": yas_gun,
         # Güvenli geçiş yüksekliği cihaz kaydından geliyor (tek doğruluk
         # kaynağı; sulama da onu kullanıyor). Koruma kapalıysa hiç
         # gönderilmiyor: ajan tarafında "kapalı" tek bir durumla (None) temsil

@@ -29,6 +29,7 @@ import os
 import shlex
 import sys
 from collections import deque
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
@@ -175,6 +176,62 @@ class SerialLink:
             await asyncio.to_thread(self._serial.write, line)
 
 
+# --------------------------------------------------------------------------- #
+# Token dosyası
+# --------------------------------------------------------------------------- #
+#
+# Token'ı systemd birim dosyasının içine yazmak iki sorun çıkarıyordu: her
+# yenilemede birimi elle düzenlemek gerekiyordu ve dosya bir kez CRLF ile
+# kaydedildiğinde token'ın sonuna görünmez bir karakter yapışıp anlaşılması
+# bir gün süren bir 403'e yol açıyordu.
+#
+# Artık ayrı bir dosyada ve **ajanın kendi yazabildiği** bir yerde duruyor:
+# eşleştirme ve otomatik yenileme insan eli değmeden çalışabilsin.
+
+VARSAYILAN_TOKEN_DOSYASI = Path.home() / ".config" / "farmbot" / "agent.env"
+
+
+def token_dosyasindan_oku(yol: Path) -> str | None:
+    """`FARMBOT_DEVICE_TOKEN=...` satırını okur."""
+    try:
+        for satir in yol.read_text(encoding="utf-8").splitlines():
+            ad, _, deger = satir.partition("=")
+            if ad.strip() == "FARMBOT_DEVICE_TOKEN":
+                return deger.strip() or None
+    except OSError:
+        return None
+    return None
+
+
+def token_dosyasina_yaz(yol: Path, token: str, api_url: str | None = None) -> None:
+    """Token'ı **atomik** olarak yazar.
+
+    Önce geçici dosyaya yazıp sonra yerine taşıyoruz: yenileme sırasında
+    elektrik giderse yarım yazılmış bir dosya kalmasın. Yarım dosya, ajanın
+    bir daha hiç bağlanamaması demek olurdu.
+    """
+    yol.parent.mkdir(parents=True, exist_ok=True)
+
+    satirlar = [f"FARMBOT_DEVICE_TOKEN={token}"]
+    if api_url:
+        satirlar.append(f"FARMBOT_API_URL={api_url}")
+    icerik = "\n".join(satirlar) + "\n"
+
+    gecici = yol.with_suffix(".tmp")
+    # newline="\n": Windows'tan düzenlenirse bile CRLF girmesin
+    with open(gecici, "w", encoding="utf-8", newline="\n") as dosya:
+        dosya.write(icerik)
+        dosya.flush()
+        os.fsync(dosya.fileno())
+    os.replace(gecici, yol)
+
+    # Token bir sırdır; başkası okuyamasın
+    try:
+        os.chmod(yol, 0o600)
+    except OSError:
+        logger.debug("Dosya izni ayarlanamadı: %s", yol)
+
+
 class CloudClient:
     """Bulut API'siyle konuşan istemci (ölçüm gönderimi + komut kanalı)."""
 
@@ -222,6 +279,20 @@ class CloudClient:
         response.raise_for_status()
         return response.json()
 
+    async def rotate_token(self) -> str:
+        """Sunucudan yeni bir token ister ve istemciyi ona geçirir.
+
+        Eski token sunucuda bir süre daha geçerli kalıyor; bu yüzden yeni
+        token'ı diske yazamasak bile ajan dışarıda kalmıyor.
+        """
+        response = await self._http.post("/api/v1/agent/rotate-token")
+        response.raise_for_status()
+        yeni = response.json()["token"]
+
+        self.token = yeni
+        self._http.headers["X-Device-Token"] = yeni
+        return yeni
+
     @property
     def websocket_url(self) -> str:
         """Komut kanalının adresi — token **içermez**.
@@ -254,6 +325,12 @@ class Agent:
         # Kamera isteğe bağlı: takılı değilse ajan sensör ve hareket köprüsü
         # olarak çalışmaya devam eder
         self.camera_command = camera_command
+        # Yenilenen token'ın yazılacağı yer; main_async dolduruyor
+        self.token_file: Path | None = None
+        self.token_rotate_days: int = 30
+        # Aynı oturumda bir kez yenilesin: sunucu yaşı bir sonraki bağlantıya
+        # kadar eski değeri bildirebilir ve döngüye girerdik
+        self._token_rotated = False
         # Hareket kontrolü isteğe bağlı: Gantry Studio kurulu değilse ajan
         # yalnızca sensör köprüsü olarak çalışmaya devam eder
         self.gantry = gantry
@@ -478,8 +555,9 @@ class Agent:
         # mesajı olarak, sonra da ayarlar her değiştiğinde gönderiyor; böylece
         # ajanı yeniden başlatmadan yeni ölçek devreye giriyor.
         if kind == "config":
+            payload = message.get("payload") or {}
+            await self._maybe_rotate_token(payload.get("token_age_days"))
             if self.gantry is not None:
-                payload = message.get("payload") or {}
                 self.gantry.calibration.update(payload.get("axes"))
                 self.gantry.calibration.limits_enabled = payload.get("limits_enabled") is not False
                 if not self.gantry.calibration.limits_enabled:
@@ -556,6 +634,50 @@ class Agent:
         except Exception:
             # Bağlantı bu arada koptuysa yanıtı yollayamayız; komut yine uygulandı
             logger.debug("Komut sonucu gönderilemedi (bağlantı kopmuş olabilir)")
+
+    async def _maybe_rotate_token(self, yas_gun: float | None) -> None:
+        """Token yeterince eskiyse yenile ve diske yaz.
+
+        Yaşı sunucu bildiriyor; ajan token'ın ne zaman üretildiğini bilmiyor
+        ve her yeniden başlatmada kendi saydığı süre sıfırlanırdı.
+
+        Sıralama önemli: önce sunucudan yeni token alınıyor, sonra diske
+        yazılıyor. Yazma başarısız olursa **hata veriyoruz ama devam
+        ediyoruz** — çünkü sunucu eski token'ı bir süre daha kabul ediyor ve
+        ajan bir sonraki açılışta eskisiyle bağlanabiliyor. Bu hoşgörü
+        olmasaydı yazamadığımız an robot kendini dışarıda bırakırdı.
+        """
+        if self._token_rotated or self.token_rotate_days <= 0:
+            return
+        if yas_gun is None or yas_gun < self.token_rotate_days:
+            return
+
+        self._token_rotated = True
+        logger.info("Token %.0f günlük; yenileniyor", yas_gun)
+        try:
+            yeni = await self.cloud.rotate_token()
+        except Exception as hata:
+            logger.warning("Token yenilenemedi (%s); mevcut token kullanılmaya devam", hata)
+            return
+
+        if self.token_file is None:
+            logger.warning(
+                "Token yenilendi ama kaydedilecek dosya tanımlı değil. "
+                "Yeniden başlatmadan önce --token-file verin, yoksa eski "
+                "token'ın hoşgörü süresi dolduğunda bağlantı kesilir."
+            )
+            return
+
+        try:
+            token_dosyasina_yaz(self.token_file, yeni, self.cloud.base_url)
+            logger.info("Yeni token kaydedildi: %s", self.token_file)
+        except OSError as hata:
+            logger.error(
+                "Yeni token %s dosyasına yazılamadı (%s). Sunucu eskisini bir "
+                "süre daha kabul ediyor; dosya izinlerini düzeltip ajanı "
+                "yeniden başlatın.",
+                self.token_file, hata,
+            )
 
     async def _apply_step(self, step: dict[str, Any]) -> None:
         """CeleryScript adımını donanım komutuna çevirir.
@@ -793,15 +915,81 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Hareket kontrolünü devre dışı bırak; yalnızca sensör köprüsü çalışsın",
     )
+    parser.add_argument(
+        "--esles",
+        metavar="KOD",
+        help=(
+            "Panelde Kurulum sayfasından alınan kısa kodla eşleş. Token'ı alıp "
+            "dosyasına yazar ve çıkar; 56 karakterlik token'ı elle taşımak gerekmez."
+        ),
+    )
+    parser.add_argument(
+        "--token-file",
+        default=os.getenv("FARMBOT_TOKEN_FILE", str(VARSAYILAN_TOKEN_DOSYASI)),
+        help="Token'ın saklandığı dosya (eşleştirme ve otomatik yenileme buraya yazar)",
+    )
+    parser.add_argument(
+        "--token-yenileme-gunu",
+        type=int,
+        default=int(os.getenv("FARMBOT_TOKEN_ROTATE_DAYS", "30")),
+        help="Token bu kadar günü geçtiyse kendiliğinden yenilensin (0 = kapalı)",
+    )
     parser.add_argument("--verbose", action="store_true", help="Ayrıntılı günlük")
     return parser
 
 
+async def eslestir(args: argparse.Namespace) -> int:
+    """Panelde gösterilen kısa kodu kalıcı token'la takas eder.
+
+    Neden bu var: token 56 karakter ve panelden Pi'ye elle taşımak her
+    seferinde bir kopyalama riskiydi. Kısa kod hem yazılabilir hem de token'ı
+    ajan kendi dosyasına kendisi yazdığı için systemd dosyasına elle
+    dokunulmuyor.
+    """
+    kod = args.esles.strip().upper()
+    hedef = Path(args.token_file).expanduser()
+
+    logger.info("Eşleştiriliyor: %s", args.api)
+    async with httpx.AsyncClient(base_url=args.api.rstrip("/"), timeout=30.0) as istemci:
+        try:
+            yanit = await istemci.post("/api/v1/agent/pair", json={"code": kod})
+        except httpx.HTTPError as hata:
+            logger.error("Sunucuya ulaşılamadı (%s): %s", args.api, hata)
+            return 1
+
+    if yanit.status_code == 401:
+        logger.error(
+            "Kod kabul edilmedi. Süresi dolmuş, daha önce kullanılmış ya da "
+            "yanlış yazılmış olabilir — panelden yeni kod üretin."
+        )
+        return 1
+    if yanit.status_code >= 400:
+        logger.error("Eşleştirme başarısız (HTTP %s): %s", yanit.status_code, yanit.text[:200])
+        return 1
+
+    veri = yanit.json()
+    token_dosyasina_yaz(hedef, veri["token"], args.api)
+
+    logger.info("Eşleştirme tamam: %s", veri["device_name"])
+    logger.info("Token yazıldı: %s", hedef)
+    logger.info("Şimdi servisi başlatın:  sudo systemctl restart farmbot-agent")
+    return 0
+
+
 async def main_async(args: argparse.Namespace) -> int:
+    token_dosyasi = Path(args.token_file).expanduser()
+    if not args.token:
+        # Ortam değişkeni yoksa ajanın kendi dosyasına bak: eşleştirme oraya
+        # yazıyor ve systemd birimini okumak zorunda kalmıyoruz.
+        args.token = token_dosyasindan_oku(token_dosyasi)
+
     if not args.token:
         logger.error(
-            "Cihaz token'ı gerekli. Panelde Ayarlar → Köprü Ajanı'ndan üretip "
-            "--token ile ya da FARMBOT_DEVICE_TOKEN ortam değişkeniyle verin."
+            "Cihaz token'ı yok. En kolay yol eşleştirme: panelde Kurulum "
+            "sayfasından kod alıp\n"
+            "    python farmbot_agent.py --esles ABCD-1234\n"
+            "çalıştırın. Alternatif olarak --token ya da FARMBOT_DEVICE_TOKEN "
+            "kullanabilirsiniz."
         )
         return 1
 
@@ -836,6 +1024,9 @@ async def main_async(args: argparse.Namespace) -> int:
         gantry,
         camera_command,
     )
+    # Yenilenen token'ın nereye yazılacağını ajan bilsin
+    agent.token_file = token_dosyasi
+    agent.token_rotate_days = args.token_yenileme_gunu
 
     try:
         await agent.run()
@@ -859,6 +1050,11 @@ def main() -> int:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("websockets").setLevel(logging.WARNING)
     try:
+        # Eşleştirme ayrı bir iş: token'ı alıp dosyasına yazar ve çıkar.
+        # Ajanı başlatmıyoruz çünkü servisi systemd yönetiyor; iki örnek aynı
+        # seri porta uzanırsa birbirlerinin verisini çalarlar.
+        if args.esles:
+            return asyncio.run(eslestir(args))
         return asyncio.run(main_async(args))
     except KeyboardInterrupt:
         return 0

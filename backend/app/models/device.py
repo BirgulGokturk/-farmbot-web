@@ -52,6 +52,25 @@ class Device(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     agent_token_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     agent_last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Token yenilendiğinde eskisi bir süre daha geçerli kalıyor.
+    #
+    # Sebebi: yenileme iki adımlı — sunucu yeni token'ı üretiyor, ajan onu
+    # diskine yazıyor. Ajan tam arada çökerse (ya da elektrik giderse) yeni
+    # token kaybolur, eskisi de geçersizdir ve robot kendini dışarıda bırakır.
+    # Kurtarmak için Pi'ye fiziksel erişim gerekir. Kısa bir hoşgörü penceresi
+    # bu riski tamamen kaldırıyor.
+    agent_token_previous_hash: Mapped[str | None] = mapped_column(String(255))
+    agent_token_rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # --- Eşleştirme kodu ---
+    # 56 karakterlik token'ı elle taşımak yerine panelde kısa ömürlü bir kod
+    # gösteriliyor; ajan onu kalıcı token'la takas edip kendi dosyasına yazıyor.
+    # Kod tek kullanımlık ve dakikalar içinde sönüyor.
+    pairing_code_hash: Mapped[str | None] = mapped_column(String(255))
+    pairing_code_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Kaba kuvvet denemesini sınırlamak için: kod kısa, deneme sayısı da öyle olmalı
+    pairing_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     # --- Son bilinen durum (MQTT'den güncellenen önbellek) ---
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

@@ -44,7 +44,7 @@ import { AXES, readMachineConfig, type AxisName } from "@/lib/machine";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
 import { useServerForm } from "@/hooks/useServerForm";
 import { cn } from "@/lib/cn";
-import type { Device } from "@/lib/types";
+import type { Device, PairingCode } from "@/lib/types";
 
 const STEPS = [
   { key: "device", title: "Makine ölçüleri", Icon: Ruler },
@@ -264,6 +264,8 @@ function AgentStep({
 }) {
   const queryClient = useQueryClient();
   const [token, setToken] = useState<string | null>(null);
+  const [pairing, setPairing] = useState<PairingCode | null>(null);
+  const [gelismis, setGelismis] = useState(false);
 
   const create = useMutation({
     mutationFn: () => api.agent.createToken(deviceId),
@@ -272,6 +274,12 @@ function AgentStep({
       void queryClient.invalidateQueries({ queryKey: ["agent-status", deviceId] });
     },
     onError: (error) => toast.error("Token üretilemedi", (error as Error).message),
+  });
+
+  const pair = useMutation({
+    mutationFn: () => api.agent.createPairingCode(deviceId),
+    onSuccess: setPairing,
+    onError: (error) => toast.error("Kod üretilemedi", (error as Error).message),
   });
 
   return (
@@ -293,13 +301,69 @@ function AgentStep({
       </p>
 
       <Button
-        variant={hasToken ? "secondary" : "primary"}
+        variant="primary"
         fullWidth
+        loading={pair.isPending}
+        onClick={() => pair.mutate()}
+      >
+        {pairing ? "Yeni kod üret" : "Eşleştirme kodu al"}
+      </Button>
+
+      {pairing && (
+        <div className="mt-4 space-y-3">
+          <div className="rounded-xl border border-brand/30 bg-brand/8 px-3.5 py-4 text-center">
+            <p className="mb-2 text-xs font-medium uppercase tracking-wider text-brand">
+              Raspberry Pi'ye bu kodu yazın
+            </p>
+            {/* Kod büyük ve aralıklı: ekrandan okunup elle yazılacak */}
+            <p className="font-mono text-3xl font-bold tracking-[0.2em] text-content">
+              {pairing.code}
+            </p>
+            <p className="mt-2 text-xs text-subtle">
+              {new Date(pairing.expires_at) > new Date()
+                ? `${Math.max(
+                    1,
+                    Math.round((new Date(pairing.expires_at).getTime() - Date.now()) / 60000),
+                  )} dakika geçerli · tek kullanımlık`
+                : "Süresi doldu — yeni kod üretin"}
+            </p>
+          </div>
+
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-content">Raspberry Pi'de çalıştırın</p>
+            <pre className="overflow-x-auto rounded-xl bg-surface-2 p-3.5 font-mono text-xs leading-relaxed text-muted">
+{`cd ~/farmbot-web/agent
+.venv/bin/python farmbot_agent.py --esles ${pairing.code}
+sudo systemctl restart farmbot-agent`}
+            </pre>
+            <p className="mt-2 text-xs leading-relaxed text-subtle">
+              Ajan kodu kalıcı token'la takas edip kendi dosyasına yazar. 56
+              karakterlik token'ı kopyalamanız ya da systemd dosyasını
+              düzenlemeniz gerekmez.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <button
+        type="button"
+        className="mt-4 w-full text-center text-xs text-subtle underline underline-offset-2 hover:text-muted"
+        onClick={() => setGelismis((a) => !a)}
+      >
+        {gelismis ? "Gelişmiş kurulumu gizle" : "Token'ı elle kurmak istiyorum"}
+      </button>
+
+      {gelismis && (
+      <Button
+        variant="secondary"
+        fullWidth
+        className="mt-3"
         loading={create.isPending}
         onClick={() => create.mutate()}
       >
         {hasToken ? "Yeni token üret (eskisi geçersiz olur)" : "Token üret"}
       </Button>
+      )}
 
       {token && (
         <div className="mt-4 space-y-3">

@@ -139,6 +139,13 @@ export interface PlantSpecies {
 }
 
 /** Rastgele serpiştirme sonucu — alan dolduysa `skipped` kaç tane sığmadığını söyler. */
+/** Ajanı bağlamak için panelde gösterilen kısa ömürlü kod. */
+export interface PairingCode {
+  code: string;
+  expires_at: string;
+  note: string;
+}
+
 export interface ScatterResult {
   created: Point[];
   requested: number;

@@ -54,3 +54,34 @@ class AgentPhotoResult(BaseModel):
     bytes: int
     # Saklama sınırı aşıldığı için silinen eski kare sayısı
     discarded: int = 0
+
+
+class PairingCodeResponse(BaseModel):
+    """Panelde gösterilen kısa ömürlü eşleştirme kodu."""
+
+    code: str
+    expires_at: datetime
+    note: str
+
+
+class AgentPairRequest(BaseModel):
+    """Ajanın kodu kalıcı token'la takas isteği."""
+
+    code: str = Field(min_length=4, max_length=32)
+
+
+class AgentPairResponse(BaseModel):
+    device_id: uuid.UUID
+    device_name: str
+    token: str
+
+
+class AgentRotateResponse(BaseModel):
+    """Yenilenmiş token.
+
+    `previous_valid_until`: eski token bu ana kadar da kabul edilir. Ajan yeni
+    token'ı diskine yazamadan çökerse kendini dışarıda bırakmasın diye.
+    """
+
+    token: str
+    previous_valid_until: datetime
