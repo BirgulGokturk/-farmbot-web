@@ -18,7 +18,12 @@ import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { PlantModel } from "@/components/viewer/PlantModel";
 import { growthAt } from "@/lib/growth";
-import { readMachineConfig, VIEWER_DEFAULTS, type ViewerConfig } from "@/lib/machine";
+import {
+  readMachineConfig,
+  VIEWER_DEFAULTS,
+  type PlantingArea,
+  type ViewerConfig,
+} from "@/lib/machine";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
 import { useServerForm } from "@/hooks/useServerForm";
 import { useBot } from "@/store/useBot";
@@ -145,8 +150,16 @@ export default function Viewer3D() {
   });
 
   const position = status?.position ?? { x: 0, y: 0, z: 0 };
-  // Takılı uç Gantry Studio'nun durum yanıtından geliyor
-  const tool = (status?.informational?.current_tool as string | undefined) ?? null;
+  /**
+   * Takılı uç.
+   *
+   * Öncelik Gantry Studio'nun durum yanıtında: makinede gerçekten ne takılı
+   * olduğunu o biliyor. Ama uç adı çoğu kurulumda hiç bildirilmiyor ve o
+   * durumda sahnede genel bir silindir görünüyordu. Ayarlarda vakumlu uç
+   * işaretlenmişse onu varsayıyoruz — kullanıcının makineye taktığı şey bu.
+   */
+  const reportedTool = (status?.informational?.current_tool as string | undefined) ?? null;
+  const tool = reportedTool ?? (stored.seeder.enabled ? "tohum" : null);
 
   /**
    * Yatak ölçüleri (m) — **tarla tasarımcısıyla aynı kaynak**.
@@ -243,6 +256,7 @@ export default function Viewer3D() {
                   viewer={viewer}
                   travel={travel}
                   tool={tool}
+                  area={stored.planting_area}
                 />
               </Canvas>
             </Suspense>
@@ -730,14 +744,38 @@ function ToolHead({ kind }: { kind: string | null }) {
 
       {type === "seed" && (
         <>
-          {/* Tohum alma ucu: ince vakum borusu */}
-          <mesh position={[0, -PROFILE * 2.6, 0]} castShadow>
-            <cylinderGeometry args={[PROFILE * 0.3, PROFILE * 0.3, PROFILE * 2.2, 12]} />
-            <meshStandardMaterial color={tint} roughness={0.4} metalness={0.2} />
+          {/* Vakum gövdesi — içinde selenoid valf var */}
+          <mesh position={[0, -PROFILE * 2.1, 0]} castShadow>
+            <cylinderGeometry args={[PROFILE * 0.42, PROFILE * 0.38, PROFILE * 1.4, 14]} />
+            <meshStandardMaterial color={tint} roughness={0.4} metalness={0.25} />
           </mesh>
-          <mesh position={[0, -PROFILE * 3.9, 0]} castShadow>
-            <cylinderGeometry args={[PROFILE * 0.12, PROFILE * 0.12, PROFILE * 0.8, 10]} />
-            <meshStandardMaterial color="#e5e7eb" metalness={0.6} roughness={0.3} />
+
+          {/* Vakum hortumu: gövdeden yana çıkıp yukarı kıvrılıyor.
+              Ucu bir borudan ibaret çizmek yetmiyordu — vakumla çalıştığı
+              ancak hortumu görününce anlaşılıyor. */}
+          <mesh
+            position={[PROFILE * 0.55, -PROFILE * 1.85, 0]}
+            rotation={[0, 0, Math.PI / 2.6]}
+            castShadow
+          >
+            <cylinderGeometry args={[PROFILE * 0.16, PROFILE * 0.16, PROFILE * 1.1, 10]} />
+            <meshStandardMaterial color="#1f2937" roughness={0.85} />
+          </mesh>
+          <mesh position={[PROFILE * 0.95, -PROFILE * 1.1, 0]} castShadow>
+            <cylinderGeometry args={[PROFILE * 0.14, PROFILE * 0.14, PROFILE * 1.5, 10]} />
+            <meshStandardMaterial color="#1f2937" roughness={0.85} />
+          </mesh>
+
+          {/* İnce emiş borusu */}
+          <mesh position={[0, -PROFILE * 3.2, 0]} castShadow>
+            <cylinderGeometry args={[PROFILE * 0.13, PROFILE * 0.11, PROFILE * 1.2, 10]} />
+            <meshStandardMaterial color="#e5e7eb" metalness={0.65} roughness={0.28} />
+          </mesh>
+
+          {/* Emiş pedi — tohumu tutan huni ağız */}
+          <mesh position={[0, -PROFILE * 3.95, 0]} castShadow>
+            <coneGeometry args={[PROFILE * 0.3, PROFILE * 0.42, 16, 1, true]} />
+            <meshStandardMaterial color="#111827" roughness={0.6} side={2} />
           </mesh>
         </>
       )}
@@ -770,12 +808,60 @@ function ToolHead({ kind }: { kind: string | null }) {
   );
 }
 
+/** Ekilebilir alanın toprak üstündeki sınır çizgisi. */
+function PlantingOutline({
+  area,
+  width,
+  length,
+  y,
+  yToScene,
+}: {
+  area: PlantingArea;
+  width: number;
+  length: number;
+  y: number;
+  yToScene: (mm: number) => number;
+}) {
+  const girilmis =
+    area.x_min_mm !== null ||
+    area.x_max_mm !== null ||
+    area.y_min_mm !== null ||
+    area.y_max_mm !== null;
+  if (!girilmis) return null;
+
+  const x0 = (area.x_min_mm ?? 0) * MM;
+  const x1 = area.x_max_mm !== null ? area.x_max_mm * MM : width;
+  const z0 = yToScene(area.y_min_mm ?? 0);
+  const z1 = area.y_max_mm !== null ? yToScene(area.y_max_mm) : length;
+
+  const w = Math.max(0.01, x1 - x0);
+  const l = Math.max(0.01, z1 - z0);
+
+  return (
+    <group position={[x0 + w / 2, y, z0 + l / 2]}>
+      {/* Dolgu değil çerçeve: toprağın rengini kapatmadan sınırı göstersin */}
+      {[
+        { pos: [0, 0, -l / 2] as const, size: [w, 0.006] as const },
+        { pos: [0, 0, l / 2] as const, size: [w, 0.006] as const },
+        { pos: [-w / 2, 0, 0] as const, size: [0.006, l] as const },
+        { pos: [w / 2, 0, 0] as const, size: [0.006, l] as const },
+      ].map((kenar, index) => (
+        <mesh key={index} position={kenar.pos} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[kenar.size[0], kenar.size[1]]} />
+          <meshBasicMaterial color="#facc15" transparent opacity={0.75} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function Scene({
   points,
   position,
   viewer,
   travel,
   tool,
+  area,
 }: {
   points: Point[];
   position: { x: number; y: number; z: number };
@@ -783,6 +869,8 @@ function Scene({
   travel: { x: number; y: number; z: number };
   /** Takılı ucun adı — uç geometrisi buna göre değişiyor. */
   tool: string | null;
+  /** Ekilebilir dikdörtgen (mm) — `null` kenarlar yatağın ölçüsüne düşer. */
+  area: PlantingArea;
 }) {
   const width = travel.x;
   const length = travel.y;
@@ -879,6 +967,19 @@ function Scene({
 
       {/* Toprak dolu saklama kabı — çerçevenin içi artık boş değil */}
       <SoilBin width={width} length={length} top={benchHeight} depth={binDepth} />
+
+      {/* Ekilebilir alan sınırı.
+          Ayarlarda girilen ofseti gözle doğrulamanın tek yolu bu: sayıların
+          sahada neye denk geldiğini görmeden doğru ölçüldüğünden emin
+          olunamıyor. Hiçbir kenar girilmemişse çizilmiyor — yatağın tamamı
+          ekilebilir demektir ve çerçeve zaten onu gösteriyor. */}
+      <PlantingOutline
+        area={area}
+        width={width}
+        length={length}
+        y={soilY + 0.004}
+        yToScene={yToScene}
+      />
 
       <RobotRig
         width={width}

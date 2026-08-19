@@ -147,7 +147,7 @@ async def current_agent_device(
     db: AsyncSession = Depends(get_db),
     x_device_token: str | None = Header(default=None, alias="X-Device-Token"),
 ) -> Device:
-    return await authenticate_agent(db, x_device_token)
+    return await authenticate_agent(db, (x_device_token or "").strip() or None)
 
 
 # --------------------------------------------------------------------------- #
@@ -373,14 +373,27 @@ async def upload_photo(
 
 @router.websocket("/agent/ws")
 async def agent_socket(websocket: WebSocket, token: str | None = None) -> None:
+    """Ajanın komut kanalı.
+
+    Token önce `X-Device-Token` başlığında aranıyor, bulunamazsa adres
+    satırındaki `?token=` kullanılıyor. Başlık tercih ediliyor çünkü adresler
+    ara sunucu ve barındırıcı kayıtlarına düz metin yazılıyor — kimlik bilgisi
+    oraya sızmamalı. Adres satırı yalnızca güncellenmemiş ajanlar bağlantısız
+    kalmasın diye kabul edilmeye devam ediyor.
+    """
     """Ajanın komutları dinlediği kanal.
 
     Token sorgu dizesinden alınır: tarayıcı dışı istemcilerde de basit olsun ve
     WebSocket el sıkışmasında özel başlık gerekmesin.
     """
+    # Görünmez karakterlere karşı kırpıyoruz: systemd birimi bir kez CRLF ile
+    # kaydedilirse token'ın sonuna satır sonu yapışıyor ve tek belirtisi
+    # anlaşılmaz bir 403 oluyor.
+    sunulan = (websocket.headers.get("X-Device-Token") or token or "").strip()
+
     async with SessionLocal() as session:
         try:
-            device = await authenticate_agent(session, token)
+            device = await authenticate_agent(session, sunulan)
         except HTTPException:
             await websocket.close(code=4401, reason="Gecersiz cihaz token'i")
             return

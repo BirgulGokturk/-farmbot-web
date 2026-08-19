@@ -180,10 +180,18 @@ class CloudClient:
 
     def __init__(self, base_url: str, token: str) -> None:
         self.base_url = base_url.rstrip("/")
-        self.token = token
+
+        # Token'daki görünmez karakterleri burada kesiyoruz.
+        #
+        # systemd birim dosyası bir kez CRLF ile kaydedilirse değerin sonuna
+        # görünmez bir satır sonu ekleniyor; token'ın sonuna o karakter yapışıyor
+        # ve sunucu onu geçersiz sayıyor. Belirtisi yalnızca "HTTP 403" olduğu
+        # için sebebi bulmak bir günümüzü almıştı. Kırpmak bu hata sınıfını
+        # tamamen kapatıyor: token'ın içinde zaten boşluk olamaz.
+        self.token = token.strip()
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
-            headers={"X-Device-Token": token},
+            headers={"X-Device-Token": self.token},
             timeout=httpx.Timeout(20.0),
         )
 
@@ -216,9 +224,21 @@ class CloudClient:
 
     @property
     def websocket_url(self) -> str:
+        """Komut kanalının adresi — token **içermez**.
+
+        Token eskiden `?token=...` olarak adres satırındaydı. İki sakıncası
+        vardı: adresler ara sunucu ve barındırıcı kayıtlarına düz metin
+        yazılıyor (kimlik bilgisi kayıtlara sızıyor) ve içindeki karakterler
+        adres kodlamasına takılabiliyordu. Artık `X-Device-Token` başlığıyla
+        gidiyor — HTTP isteklerinde zaten öyle yapıyorduk.
+        """
         scheme = "wss" if self.base_url.startswith("https") else "ws"
         host = self.base_url.split("://", 1)[1]
-        return f"{scheme}://{host}/api/v1/agent/ws?token={self.token}"
+        return f"{scheme}://{host}/api/v1/agent/ws"
+
+    @property
+    def websocket_headers(self) -> dict[str, str]:
+        return {"X-Device-Token": self.token}
 
 
 class Agent:
@@ -352,6 +372,7 @@ class Agent:
             try:
                 async with websockets.connect(
                     self.cloud.websocket_url,
+                    additional_headers=self.cloud.websocket_headers,
                     ping_interval=20,
                     ping_timeout=20,
                     max_size=2**20,
@@ -364,7 +385,21 @@ class Agent:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning("Komut kanalı koptu (%s), %.0f sn sonra yeniden", exc, delay)
+                # 403/401 tek bir şey demek: sunucu token'ı tanımadı. Ham
+                # kütüphane mesajı ("server rejected WebSocket connection")
+                # bunu söylemediği için saatlerce ağ sorunu aranabiliyor.
+                if "403" in str(exc) or "401" in str(exc):
+                    logger.error(
+                        "Sunucu token'ı reddetti. Paneldeki cihaz token'ı ile "
+                        "birimdeki FARMBOT_DEVICE_TOKEN aynı mı kontrol edin "
+                        "(panelde yeni token ürettiyseniz eskisi geçersiz olur). "
+                        "%.0f sn sonra yeniden denenecek.",
+                        delay,
+                    )
+                else:
+                    logger.warning(
+                        "Komut kanalı koptu (%s), %.0f sn sonra yeniden", exc, delay
+                    )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30.0)
             finally:

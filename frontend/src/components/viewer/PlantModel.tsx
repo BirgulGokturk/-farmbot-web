@@ -143,7 +143,7 @@ function Leaf({
       <mesh
         position={[size * 0.55, 0, 0]}
         rotation={[0, 0, -tilt]}
-        scale={[1, 0.16, 0.6 * slim]}
+        scale={[1, 0.14, 0.5 * slim]}
         castShadow
       >
         <sphereGeometry args={[size * 0.62, 12, 8]} />
@@ -195,13 +195,23 @@ export function PlantModel({
 }: PlantModelProps) {
   const form = formForSlug(species.slug);
   const grown = Math.max(0, (progress - 0.12) / 0.88);
-  // Meyve olgunluğun ikinci yarısında beliriyor
-  const fruiting = Math.max(0, (progress - 0.55) / 0.45);
+  // Meyve olgunluğun üçte birinde belirmeye başlıyor.
+  //
+  // Önce ikinci yarıya bırakılmıştı ve bahçenin çoğu her zaman yeşil bir
+  // yığın gibi görünüyordu: hangi sırada ne ekili olduğu ancak etiketten
+  // anlaşılıyordu. Meyve, türü ayırt ettiren tek işaret; erken görünmeli.
+  const fruiting = Math.max(0, (progress - 0.35) / 0.65);
 
-  /** Yapraklar altın açıyla dağıtılıyor: eşit aralık yapay duruyor. */
+  /**
+   * Yapraklar altın açıyla dağıtılıyor: eşit aralık yapay duruyor.
+   *
+   * Sayı 9'dan 5'e indirildi. Yapraklar sahnenin çoğunu kaplayıp meyveyi
+   * örtüyordu; oysa uzaktan bakan biri için bilgi taşıyan şey meyve. Siluet
+   * beş yaprakla da okunuyor, üstü artık kalabalık değil.
+   */
   const golden = Math.PI * (3 - Math.sqrt(5));
   const angles = useMemo(
-    () => Array.from({ length: 9 }, (_, i) => i * golden),
+    () => Array.from({ length: 5 }, (_, i) => i * golden),
     [golden],
   );
 
@@ -216,10 +226,10 @@ export function PlantModel({
               <cylinderGeometry args={[radius * 0.05, radius * 0.09, h, 7]} />
               <meshStandardMaterial color={STEM} roughness={0.85} />
             </mesh>
-            {angles.slice(0, 6).map((a, i) => (
+            {angles.map((a, i) => (
               <Leaf
                 key={i}
-                size={radius * (1.1 - i * 0.09)}
+                size={radius * (0.78 - i * 0.07)}
                 angle={a}
                 tilt={0.35 + i * 0.14}
                 y={h * (0.25 + i * 0.12)}
@@ -230,8 +240,8 @@ export function PlantModel({
             {fruiting > 0.05 && (
               <Fruit
                 emoji={species.icon}
-                size={radius * 0.75 * fruiting}
-                position={[radius * 0.18, h * 0.45, 0]}
+                size={radius * 1.25 * fruiting}
+                position={[radius * 0.2, h * 0.45, 0]}
               />
             )}
           </>
@@ -243,10 +253,10 @@ export function PlantModel({
         const h = radius * (0.2 + grown * 0.45);
         return (
           <>
-            {angles.slice(0, 7).map((a, i) => (
+            {angles.map((a, i) => (
               <Leaf
                 key={i}
-                size={radius * (0.55 + (i % 3) * 0.1) * (0.4 + grown * 0.8)}
+                size={radius * (0.4 + (i % 3) * 0.07) * (0.4 + grown * 0.7)}
                 angle={a}
                 tilt={1.25}
                 y={h * (0.4 + (i % 3) * 0.2)}
@@ -254,11 +264,11 @@ export function PlantModel({
               />
             ))}
             {fruiting > 0.05 &&
-              angles.slice(0, 3).map((a, i) => (
+              angles.slice(0, 4).map((a, i) => (
                 <Fruit
                   key={i}
                   emoji={species.icon}
-                  size={radius * 0.5 * fruiting}
+                  size={radius * 0.85 * fruiting}
                   position={[
                     Math.cos(a + 0.7) * radius * 0.5,
                     radius * 0.22 * fruiting,
@@ -280,7 +290,7 @@ export function PlantModel({
               return (
                 <Leaf
                   key={i}
-                  size={radius * (0.95 - t * 0.45) * (0.35 + grown * 0.8)}
+                  size={radius * (0.7 - t * 0.3) * (0.35 + grown * 0.75)}
                   angle={a}
                   tilt={1.15 - t * 0.7}
                   y={h * (0.15 + t * 0.85)}
@@ -291,7 +301,7 @@ export function PlantModel({
             {fruiting > 0.05 && (
               <Fruit
                 emoji={species.icon}
-                size={radius * 0.8 * fruiting}
+                size={radius * 1.3 * fruiting}
                 position={[0, h * 1.05, 0]}
               />
             )}
@@ -308,10 +318,10 @@ export function PlantModel({
               <sphereGeometry args={[radius * 0.3 * (0.3 + grown), 12, 8]} />
               <meshStandardMaterial color={species.color} roughness={0.6} />
             </mesh>
-            {angles.slice(0, 7).map((a, i) => (
+            {angles.map((a, i) => (
               <Leaf
                 key={i}
-                size={radius * 0.75 * (0.3 + grown * 0.9)}
+                size={radius * 0.55 * (0.3 + grown * 0.85)}
                 angle={a}
                 tilt={0.25 + (i % 3) * 0.18}
                 y={h * (0.4 + (i % 3) * 0.18)}
@@ -322,8 +332,8 @@ export function PlantModel({
             {fruiting > 0.05 && (
               <Fruit
                 emoji={species.icon}
-                size={radius * 0.6 * fruiting}
-                position={[radius * 0.42, radius * 0.35, 0]}
+                size={radius * 1.05 * fruiting}
+                position={[radius * 0.4, radius * 0.4, 0]}
               />
             )}
           </>
@@ -342,7 +352,7 @@ export function PlantModel({
             {angles.map((a, i) => (
               <Leaf
                 key={i}
-                size={radius * 0.4 * (0.35 + grown * 0.75)}
+                size={radius * 0.32 * (0.35 + grown * 0.7)}
                 angle={a}
                 tilt={0.85}
                 y={h * (0.25 + (i / angles.length) * 0.7)}
@@ -362,10 +372,10 @@ export function PlantModel({
               <cylinderGeometry args={[radius * 0.04, radius * 0.075, h, 7]} />
               <meshStandardMaterial color={STEM} roughness={0.85} />
             </mesh>
-            {angles.slice(0, 7).map((a, i) => (
+            {angles.map((a, i) => (
               <Leaf
                 key={i}
-                size={radius * (0.65 - (i % 3) * 0.08) * (0.35 + grown * 0.85)}
+                size={radius * (0.46 - (i % 3) * 0.06) * (0.35 + grown * 0.8)}
                 angle={a}
                 tilt={0.7 + (i % 2) * 0.3}
                 y={h * (0.3 + (i / 7) * 0.65)}
@@ -373,11 +383,11 @@ export function PlantModel({
               />
             ))}
             {fruiting > 0.05 &&
-              angles.slice(0, 3).map((a, i) => (
+              angles.slice(0, 4).map((a, i) => (
                 <Fruit
                   key={i}
                   emoji={species.icon}
-                  size={radius * 0.52 * fruiting}
+                  size={radius * 0.9 * fruiting}
                   position={[
                     Math.cos(a + 1.1) * radius * 0.38,
                     h * (0.45 + i * 0.12),

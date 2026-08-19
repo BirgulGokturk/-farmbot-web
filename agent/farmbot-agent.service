@@ -2,9 +2,17 @@
 #
 # systemd, dosyanın başındaki BOM yüzünden `[Unit]` satırını bölüm başlığı
 # saymıyor ve altındaki her satır için "Assignment outside of section" deyip
-# yok sayıyor. CRLF ise daha sinsi: değerin sonuna görünmez bir  ekliyor,
-# yani token `fbt_...` olarak okunuyor ve sunucu onu geçersiz sayıyor.
-# Windows'ta düzenlerken editörünüzün bu ikisini bozmadığından emin olun.
+# yok sayıyor. Windows'ta düzenlerken editörünüzün bunu bozmadığından emin
+# olun; en güvenlisi dosyayı Pi'nin kendi kabuğunda oluşturmak.
+#
+# TOKEN BURADA DEĞİL
+# ------------------
+# Cihaz token'ı ayrı bir dosyada (/etc/farmbot/agent.env) tutuluyor. Sebebi:
+# token'ı yenilemek eskiden bu birim dosyasını baştan yazmayı gerektiriyordu
+# ve her yazışta satır sonu / kopyalama hatası riski vardı — bir kez CRLF ile
+# kaydedildiğinde token'ın sonuna görünmez bir karakter yapışıp sunucu
+# tarafında anlaşılmaz bir 403'e dönüşüyordu. Artık yenileme tek satırlık bir
+# dosyayı değiştirmekten ibaret; bu dosyaya bir daha dokunmak gerekmiyor.
 
 [Unit]
 Description=FarmBot köprü ajanı (Arduino -> bulut)
@@ -15,17 +23,21 @@ Wants=network-online.target
 [Service]
 Type=simple
 
-# --- DÜZENLEYİN ---
+# --- DÜZENLEYİN: kendi kullanıcı adınız ve dizininiz ---
 User=pi
 WorkingDirectory=/home/pi/farmbot-web/agent
+ExecStart=/home/pi/farmbot-web/agent/.venv/bin/python farmbot_agent.py
+# -------------------------------------------------------
+
 Environment=FARMBOT_SERIAL_PORT=/dev/ttyUSB0
 Environment=FARMBOT_BAUD=9600
 Environment=FARMBOT_GANTRY_URL=http://localhost:8091
 Environment=FARMBOT_API_URL=https://farmbot-api.onrender.com
-Environment=FARMBOT_DEVICE_TOKEN=fbt_BURAYA_TOKEN_YAPISTIRIN
-# ------------------
 
-ExecStart=/home/pi/farmbot-web/agent/.venv/bin/python farmbot_agent.py
+# Token buradan okunuyor. Dosya yoksa servis başlamasın istemiyoruz —
+# baştaki `-` "yoksa görmezden gel" demek; ajan zaten token'sız çalışamadığını
+# açıkça söylüyor ve bu hâli teşhis etmesi daha kolay.
+EnvironmentFile=-/etc/farmbot/agent.env
 
 # Ajan çökerse ya da Arduino çıkarılırsa kendiliğinden toparlansın
 Restart=always
