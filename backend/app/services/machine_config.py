@@ -44,11 +44,39 @@ AXIS_DEFAULTS: dict[str, Any] = {
     "accel": None,     # ivme; None = makineninkini kullan
 }
 
+# --------------------------------------------------------------------------- #
+# Uç değiştirme
+# --------------------------------------------------------------------------- #
+#
+# Alan adları Gantry Studio'nun "Tool change & safe zones" ekranıyla birebir
+# aynı tutuldu. Sebebi: aynı makinenin aynı ayarı iki arayüzde farklı adla
+# görünürse hangisinin geçerli olduğu tartışma konusu olur ve ortakla
+# konuşurken ortak bir dil kalmaz.
+#
+# Yandan yaklaşma kuralı (PLC_BRIEF.md §7): kafa ucun **üstüne dikey inemez**,
+# yalnızca tek eksen boyunca altına kayar. Sıra:
+#   ① Travel Z'ye çık → ② yaklaşma noktası üzerine yatayda git → ③ ucun
+#   yanında alçal → ④ altına kay (tek eksen) → ⑤ kilitle → ⑥ Lift kadar kaldır
+# Bırakma bunun tersi.
 TOOL_ZONE_DEFAULTS: dict[str, Any] = {
     "enabled": False,
-    "safe_z": 0.0,      # yuvaya girmeden önce çıkılacak yükseklik
-    "approach_mm": 40.0,  # yuvaya yatayda yaklaşma payı
-    "slots": [],        # [{"name": ..., "x":, "y":, "z":}]
+    "safe_z": 0.0,           # jog korumasının istediği asgari yükseklik
+    "travel_z": 0.0,         # uçların üstünden geçiş yüksekliği
+    "lift_mm": 0.0,          # kilitledikten sonra kaldırma payı
+    "slide_axis": "y",       # altına kayarken kullanılan tek eksen
+    "approach_offset": 0.0,  # yaklaşma noktası: hedef + bu değer (işaretli)
+    "change_speed": 20.0,    # uç değiştirme sırasındaki hız (mm/s)
+    "presence_reg": 0,       # ucun takılı olduğunu bildiren PLC D-yazmacı
+    "z_safe_reg": 0,         # Z güvenli yükseklikte mi bilgisini veren D-yazmacı
+    "lock_servo_reg": 0,     # kilitleme servosu D-yazmacı (1 = kilitle, 0 = bırak)
+    "lock_delay_ms": 1500,   # servo komutundan sonra beklenecek süre
+    "slots": [],             # [{"name":, "x":, "y":, "z":}] — z = kavrama yüksekliği
+    "zones": [],             # [{"name":, "x1":, "y1":, "x2":, "y2":, "allow_if":}]
+    "change_area": {         # içinde Z güvenlik kilidinin devre dışı kaldığı dörtgen
+        "enabled": False,
+        "corners": [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]],
+    },
+    "current_tool": None,    # takılı olduğu bilinen uç
 }
 
 # --------------------------------------------------------------------------- #
@@ -219,13 +247,75 @@ def normalize_tool_zone(raw: Any) -> dict[str, Any]:
             }
         )
 
+    zones: list[dict[str, Any]] = []
+    for item in source.get("zones") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        zones.append(
+            {
+                "name": name[:60],
+                "x1": _number(item.get("x1"), 0.0),
+                "y1": _number(item.get("y1"), 0.0),
+                "x2": _number(item.get("x2"), 0.0),
+                "y2": _number(item.get("y2"), 0.0),
+                # Serbest ifade; burada **çalıştırmıyoruz**, yalnızca saklıyoruz.
+                # Değerlendirme hareketi gönderen katmanın işi.
+                "allow_if": str(item.get("allow_if") or "").strip()[:200],
+            }
+        )
+
+    raw_area = source.get("change_area")
+    area_source = raw_area if isinstance(raw_area, dict) else {}
+    corners: list[list[float]] = []
+    for item in (area_source.get("corners") or [])[:4]:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            corners.append([_number(item[0], 0.0), _number(item[1], 0.0)])
+    # Dörtgen her zaman dört köşeli olsun: eksik köşe arayüzde boş kutu demek
+    while len(corners) < 4:
+        corners.append([0.0, 0.0])
+
+    # Eski kurulumlarla uyum: `approach_mm` pozitif tutulup çıkarılıyordu,
+    # yeni alan işaretli ve ekleniyor. İkisi aynı şeyi anlatıyor; eski değeri
+    # sessizce kaybetmemek için işaretini çevirerek taşıyoruz.
+    if source.get("approach_offset") is None and source.get("approach_mm") is not None:
+        approach = -_number(source.get("approach_mm"), 0.0)
+    else:
+        approach = _number(source.get("approach_offset"), 0.0)
+
+    slide = str(source.get("slide_axis") or "y").strip().lower()
+    if slide not in {"x", "y"}:
+        slide = "y"
+
+    current = source.get("current_tool")
+
     return {
         "enabled": bool(source.get("enabled", TOOL_ZONE_DEFAULTS["enabled"])),
         "safe_z": _number(source.get("safe_z"), float(TOOL_ZONE_DEFAULTS["safe_z"])),
-        "approach_mm": _number(
-            source.get("approach_mm"), float(TOOL_ZONE_DEFAULTS["approach_mm"])
+        "travel_z": _number(source.get("travel_z"), float(TOOL_ZONE_DEFAULTS["travel_z"])),
+        "lift_mm": _number(source.get("lift_mm"), float(TOOL_ZONE_DEFAULTS["lift_mm"])),
+        "slide_axis": slide,
+        "approach_offset": approach,
+        "change_speed": _number(
+            source.get("change_speed"),
+            float(TOOL_ZONE_DEFAULTS["change_speed"]),
+            magnitude=(0.1, 1000.0),
+        ),
+        "presence_reg": int(_number(source.get("presence_reg"), 0.0, span=(0, 65535))),
+        "z_safe_reg": int(_number(source.get("z_safe_reg"), 0.0, span=(0, 65535))),
+        "lock_servo_reg": int(_number(source.get("lock_servo_reg"), 0.0, span=(0, 65535))),
+        "lock_delay_ms": int(
+            _number(source.get("lock_delay_ms"), 1500.0, span=(0, 60000))
         ),
         "slots": slots[:12],
+        "zones": zones[:12],
+        "change_area": {
+            "enabled": bool(area_source.get("enabled", False)),
+            "corners": corners,
+        },
+        "current_tool": str(current)[:60] if current else None,
     }
 
 

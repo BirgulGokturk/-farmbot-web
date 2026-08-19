@@ -32,11 +32,46 @@ export interface ToolSlot {
   z: number;
 }
 
+/** Yasaklı kutu — hedefi içine düşen hareket, koşul doğru değilse engellenir. */
+export interface RestrictedZone {
+  name: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  /** Serbest ifade; burada çalıştırılmıyor, yalnızca saklanıyor. */
+  allow_if: string;
+}
+
+/** İçinde Z güvenlik kilidinin devre dışı kaldığı dörtgen. */
+export interface ChangeArea {
+  enabled: boolean;
+  corners: [number, number][];
+}
+
+/**
+ * Uç değiştirme ayarları.
+ *
+ * Alan adları Gantry Studio'nun "Tool change & safe zones" ekranıyla birebir
+ * aynı: aynı makinenin aynı ayarı iki arayüzde farklı adla görünürse
+ * hangisinin geçerli olduğu tartışma konusu olur.
+ */
 export interface ToolZoneConfig {
   enabled: boolean;
   safe_z: number;
-  approach_mm: number;
+  travel_z: number;
+  lift_mm: number;
+  slide_axis: "x" | "y";
+  approach_offset: number;
+  change_speed: number;
+  presence_reg: number;
+  z_safe_reg: number;
+  lock_servo_reg: number;
+  lock_delay_ms: number;
   slots: ToolSlot[];
+  zones: RestrictedZone[];
+  change_area: ChangeArea;
+  current_tool: string | null;
 }
 
 export interface ViewerConfig {
@@ -113,8 +148,19 @@ export const AXIS_DEFAULTS: AxisConfig = {
 export const TOOL_ZONE_DEFAULTS: ToolZoneConfig = {
   enabled: false,
   safe_z: 0,
-  approach_mm: 40,
+  travel_z: 0,
+  lift_mm: 0,
+  slide_axis: "y",
+  approach_offset: 0,
+  change_speed: 20,
+  presence_reg: 0,
+  z_safe_reg: 0,
+  lock_servo_reg: 0,
+  lock_delay_ms: 1500,
   slots: [],
+  zones: [],
+  change_area: { enabled: false, corners: [[0, 0], [0, 0], [0, 0], [0, 0]] },
+  current_tool: null,
 };
 
 export const VIEWER_DEFAULTS: ViewerConfig = {
@@ -162,6 +208,18 @@ function readAxis(raw: unknown): AxisConfig {
   };
 }
 
+function readChangeArea(raw: unknown): ChangeArea {
+  const source = (raw ?? {}) as Record<string, unknown>;
+  const list = Array.isArray(source.corners) ? (source.corners as unknown[]) : [];
+  const corners: [number, number][] = list.slice(0, 4).map((item) => {
+    const c = Array.isArray(item) ? item : [];
+    return [num(c[0], 0), num(c[1], 0)];
+  });
+  // Dörtgen her zaman dört köşeli olsun: eksik köşe arayüzde boş kutu demek
+  while (corners.length < 4) corners.push([0, 0]);
+  return { enabled: Boolean(source.enabled), corners };
+}
+
 /** `device.settings` içinden eksiksiz bir yapılandırma çıkarır. */
 export function readMachineConfig(settings: Record<string, unknown> | undefined): MachineConfig {
   const source = (settings ?? {}) as Record<string, unknown>;
@@ -181,7 +239,20 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
     tool_zone: {
       enabled: Boolean(rawZone.enabled),
       safe_z: num(rawZone.safe_z, TOOL_ZONE_DEFAULTS.safe_z),
-      approach_mm: num(rawZone.approach_mm, TOOL_ZONE_DEFAULTS.approach_mm),
+      travel_z: num(rawZone.travel_z, TOOL_ZONE_DEFAULTS.travel_z),
+      lift_mm: num(rawZone.lift_mm, TOOL_ZONE_DEFAULTS.lift_mm),
+      slide_axis: String(rawZone.slide_axis ?? "y").toLowerCase() === "x" ? "x" : "y",
+      // Eski kurulumlarla uyum: `approach_mm` pozitif tutulup çıkarılıyordu,
+      // yeni alan işaretli ve ekleniyor. Aynı şeyi anlatıyorlar.
+      approach_offset:
+        rawZone.approach_offset === undefined && rawZone.approach_mm !== undefined
+          ? -num(rawZone.approach_mm, 0)
+          : num(rawZone.approach_offset, TOOL_ZONE_DEFAULTS.approach_offset),
+      change_speed: num(rawZone.change_speed, TOOL_ZONE_DEFAULTS.change_speed),
+      presence_reg: num(rawZone.presence_reg, 0),
+      z_safe_reg: num(rawZone.z_safe_reg, 0),
+      lock_servo_reg: num(rawZone.lock_servo_reg, 0),
+      lock_delay_ms: num(rawZone.lock_delay_ms, TOOL_ZONE_DEFAULTS.lock_delay_ms),
       slots: Array.isArray(rawZone.slots)
         ? (rawZone.slots as unknown[]).flatMap((item) => {
             const slot = (item ?? {}) as Record<string, unknown>;
@@ -191,6 +262,26 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
               : [];
           })
         : [],
+      zones: Array.isArray(rawZone.zones)
+        ? (rawZone.zones as unknown[]).flatMap((item) => {
+            const z = (item ?? {}) as Record<string, unknown>;
+            const name = String(z.name ?? "").trim();
+            return name
+              ? [
+                  {
+                    name,
+                    x1: num(z.x1, 0),
+                    y1: num(z.y1, 0),
+                    x2: num(z.x2, 0),
+                    y2: num(z.y2, 0),
+                    allow_if: String(z.allow_if ?? ""),
+                  },
+                ]
+              : [];
+          })
+        : [],
+      change_area: readChangeArea(rawZone.change_area),
+      current_tool: rawZone.current_tool ? String(rawZone.current_tool) : null,
     },
     viewer: {
       camera_angle:
