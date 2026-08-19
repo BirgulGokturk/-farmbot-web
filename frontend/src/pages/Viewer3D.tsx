@@ -46,6 +46,8 @@ export default function Viewer3D() {
   });
 
   const position = status?.position ?? { x: 0, y: 0, z: 0 };
+  // Takılı uç Gantry Studio'nun durum yanıtından geliyor
+  const tool = (status?.informational?.current_tool as string | undefined) ?? null;
 
   /**
    * Makinenin gerçek strok ölçüleri (m).
@@ -116,6 +118,7 @@ export default function Viewer3D() {
                   position={position}
                   viewer={viewer}
                   travel={travel}
+                  tool={tool}
                 />
               </Canvas>
             </Suspense>
@@ -610,27 +613,208 @@ function ToolRack({ x, y, z }: { x: number; y: number; z: number }) {
   );
 }
 
+/** Aletin toplam boyu (m) — hızlı bağlantı + uç. Portal yüksekliği buna bağlı. */
+const TOOL_LENGTH = 0.12;
+
+/**
+ * Değiştirilebilir uç.
+ *
+ * Makinede tek bir alet yok: sulama ucu, tohum alma ucu, toprak sensörü…
+ * Hepsi aynı hızlı bağlantıya takılıyor, yalnızca uç kısmı değişiyor. Burada
+ * da gövde ortak, uç `kind`'e göre farklı çiziliyor.
+ *
+ * Hangi ucun takılı olduğu Gantry Studio'nun durum yanıtındaki `current_tool`
+ * alanından geliyor; tanımadığımız bir isimde genel uç gösteriliyor.
+ */
+function ToolHead({ kind }: { kind: string | null }) {
+  const label = (kind ?? "").toLocaleLowerCase("tr");
+  const type = label.includes("sula") || label.includes("water")
+    ? "water"
+    : label.includes("tohum") || label.includes("seed") || label.includes("ek")
+      ? "seed"
+      : label.includes("toprak") || label.includes("soil") || label.includes("sensör")
+        ? "soil"
+        : "generic";
+
+  const tint =
+    type === "water" ? "#38bdf8" : type === "seed" ? "#f59e0b" : type === "soil" ? "#22c55e" : "#94a3b8";
+
+  return (
+    <group>
+      {/* Hızlı bağlantı gövdesi — her uçta ortak */}
+      <mesh castShadow>
+        <boxGeometry args={[PROFILE * 1.8, PROFILE * 2.2, PROFILE * 1.8]} />
+        <meshStandardMaterial {...DARK_PART} />
+      </mesh>
+      {/* Kilitleme bileziği */}
+      <mesh position={[0, -PROFILE * 1.3, 0]} castShadow>
+        <cylinderGeometry args={[PROFILE * 0.85, PROFILE * 0.85, PROFILE * 0.5, 16]} />
+        <meshStandardMaterial color="#6b7280" metalness={0.75} roughness={0.3} />
+      </mesh>
+
+      {type === "water" && (
+        <>
+          {/* Sulama ucu: gövde + geniş ağızlı meme */}
+          <mesh position={[0, -PROFILE * 2.4, 0]} castShadow>
+            <cylinderGeometry args={[PROFILE * 0.5, PROFILE * 0.5, PROFILE * 1.8, 16]} />
+            <meshStandardMaterial color={tint} roughness={0.35} metalness={0.15} />
+          </mesh>
+          <mesh position={[0, -PROFILE * 3.5, 0]} castShadow>
+            <coneGeometry args={[PROFILE * 0.9, PROFILE * 0.9, 18, 1, true]} />
+            <meshStandardMaterial color={tint} roughness={0.3} metalness={0.2} side={2} />
+          </mesh>
+          {/* Hortum bağlantısı */}
+          <mesh position={[PROFILE * 0.9, -PROFILE * 1.9, 0]} rotation={[0, 0, Math.PI / 2.4]} castShadow>
+            <cylinderGeometry args={[PROFILE * 0.28, PROFILE * 0.28, PROFILE * 1.6, 10]} />
+            <meshStandardMaterial color="#1f2937" roughness={0.85} />
+          </mesh>
+        </>
+      )}
+
+      {type === "seed" && (
+        <>
+          {/* Tohum alma ucu: ince vakum borusu */}
+          <mesh position={[0, -PROFILE * 2.6, 0]} castShadow>
+            <cylinderGeometry args={[PROFILE * 0.3, PROFILE * 0.3, PROFILE * 2.2, 12]} />
+            <meshStandardMaterial color={tint} roughness={0.4} metalness={0.2} />
+          </mesh>
+          <mesh position={[0, -PROFILE * 3.9, 0]} castShadow>
+            <cylinderGeometry args={[PROFILE * 0.12, PROFILE * 0.12, PROFILE * 0.8, 10]} />
+            <meshStandardMaterial color="#e5e7eb" metalness={0.6} roughness={0.3} />
+          </mesh>
+        </>
+      )}
+
+      {type === "soil" && (
+        <>
+          {/* Toprak sensörü: iki çatal prob */}
+          {[-PROFILE * 0.35, PROFILE * 0.35].map((dx, index) => (
+            <mesh key={index} position={[dx, -PROFILE * 3, 0]} castShadow>
+              <cylinderGeometry args={[PROFILE * 0.1, PROFILE * 0.06, PROFILE * 3, 8]} />
+              <meshStandardMaterial color={tint} metalness={0.7} roughness={0.3} />
+            </mesh>
+          ))}
+        </>
+      )}
+
+      {type === "generic" && (
+        <mesh position={[0, -PROFILE * 2.6, 0]} castShadow>
+          <cylinderGeometry args={[PROFILE * 0.5, PROFILE * 0.28, PROFILE * 2.2, 16]} />
+          <meshStandardMaterial color={tint} metalness={0.5} roughness={0.4} />
+        </mesh>
+      )}
+
+      {/* Uç ucundaki gösterge — konumu gözle takip etmeyi kolaylaştırıyor */}
+      <mesh position={[0, -PROFILE * 4.4, 0]}>
+        <sphereGeometry args={[PROFILE * 0.22, 10, 8]} />
+        <meshStandardMaterial color={tint} emissive={tint} emissiveIntensity={0.55} />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * Elektrik kabini — makinenin yanında duran pano.
+ *
+ * Sahada makinenin sağında ayrı bir kabin var; sürücüler, PLC ve besleme orada.
+ * Sahnede bulunması hem gerçeğe uyuyor hem de makinenin ölçeğini okunur kılıyor.
+ */
+function ElectricalCabinet({
+  x,
+  z,
+  height,
+}: {
+  x: number;
+  z: number;
+  height: number;
+}) {
+  const w = 0.28;
+  const d = 0.2;
+
+  return (
+    <group position={[x, 0, z]}>
+      {/* Gövde */}
+      <mesh position={[0, height / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, height, d]} />
+        <meshStandardMaterial color="#9aa3ad" metalness={0.45} roughness={0.45} />
+      </mesh>
+      {/* Kapak */}
+      <mesh position={[0, height / 2, d / 2 + 0.002]} castShadow>
+        <boxGeometry args={[w * 0.9, height * 0.9, 0.006]} />
+        <meshStandardMaterial color="#b6bec7" metalness={0.5} roughness={0.4} />
+      </mesh>
+      {/* Kol */}
+      <mesh position={[w * 0.36, height * 0.52, d / 2 + 0.014]} castShadow>
+        <boxGeometry args={[0.012, 0.07, 0.014]} />
+        <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.35} />
+      </mesh>
+      {/* Havalandırma dilimleri */}
+      {[0, 1, 2, 3].map((i) => (
+        <mesh key={i} position={[-w * 0.28, height * 0.78 - i * 0.018, d / 2 + 0.008]}>
+          <boxGeometry args={[w * 0.34, 0.006, 0.004]} />
+          <meshStandardMaterial color="#6b7280" roughness={0.7} />
+        </mesh>
+      ))}
+      {/* Çalışıyor lambası */}
+      <mesh position={[w * 0.3, height * 0.86, d / 2 + 0.012]}>
+        <cylinderGeometry args={[0.008, 0.008, 0.006, 12]} />
+        <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.9} />
+      </mesh>
+      {/* Ayaklar */}
+      {[-1, 1].map((s) => (
+        <mesh key={s} position={[s * w * 0.38, 0.015, 0]} castShadow>
+          <boxGeometry args={[0.02, 0.03, d * 0.8]} />
+          <meshStandardMaterial {...DARK_PART} />
+        </mesh>
+      ))}
+      {/* Makineye giden kablo kanalı */}
+      <mesh position={[-w * 0.6, height * 0.35, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.012, 0.012, w * 0.7, 10]} />
+        <meshStandardMaterial color="#15181d" roughness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
 function Scene({
   points,
   position,
   viewer,
   travel,
+  tool,
 }: {
   points: Point[];
   position: { x: number; y: number; z: number };
   viewer: ViewerConfig;
   travel: { x: number; y: number; z: number };
+  /** Takılı ucun adı — uç geometrisi buna göre değişiyor. */
+  tool: string | null;
 }) {
   const width = travel.x;
   const length = travel.y;
   const benchHeight = LEG_HEIGHT * viewer.robot_scale;
-  // Portal yüksekliği Z ekseninin gerçek stroğu kadar
-  const portal = Math.max(0.25, travel.z) * viewer.robot_scale;
+
+  const zTravel = Math.max(0.25, travel.z) * viewer.robot_scale;
 
   // Toprak kabı çerçevenin içine oturuyor; bitkiler tezgâh düzleminde değil,
   // toprağın yüzeyinde bitiyor.
   const binDepth = Math.min(0.18, Math.max(0.08, Math.min(width, length) * 0.35));
   const soilY = benchHeight - binDepth * 0.22;
+
+  /*
+   * Kirişin yüksekliği tahminle değil, **fiziksel kısıttan** türetiliyor:
+   * uç, Z tamamen inikken toprağa tam değmeli.
+   *
+   *   uç dinlenme hizası = toprak + Z stroğu      (Z sıfırdayken en üstte)
+   *   kiriş              = uç dinlenme + alet boyu + araba payı
+   *
+   * Önceki hesap kirişi doğrudan Z stroğuna eşitliyordu; aletin kendi boyunu
+   * saymadığı için makine hem kısa duruyordu hem de uç toprağa 33 mm
+   * yetişemiyordu.
+   */
+  const toolRestY = soilY + zTravel;
+  const beamY = toolRestY + TOOL_LENGTH + PROFILE * 3;
+  const portal = beamY - benchHeight;
 
   const plants = useMemo(
     () => points.filter((p) => p.point_type === "plant" && p.species),
@@ -698,6 +882,13 @@ function Scene({
         z={length * 0.22}
       />
 
+      {/* Elektrik kabini — makinenin sağında, sahadaki gibi ayrı duruyor */}
+      <ElectricalCabinet
+        x={width + 0.26}
+        z={length * 0.55}
+        height={benchHeight + portal * 0.45}
+      />
+
       {/* Bekleyen uçların askısı — kabın uzak ucunda, toprağın üstünde durur.
           Çerçevenin dışına koymak havada asılı gibi görünüyordu. */}
       <ToolRack
@@ -711,6 +902,9 @@ function Scene({
         length={length}
         benchHeight={benchHeight}
         portal={portal}
+        toolRestY={toolRestY}
+        zTravel={zTravel}
+        tool={tool}
         target={{ x: position.x * MM, y: position.y * MM, z: position.z * MM }}
       />
 
@@ -749,12 +943,20 @@ function RobotRig({
   length,
   benchHeight,
   portal,
+  toolRestY,
+  zTravel,
+  tool,
   target,
 }: {
   width: number;
   length: number;
   benchHeight: number;
   portal: number;
+  /** Z sıfırdayken ucun bağlantı hizası (m) */
+  toolRestY: number;
+  /** Z ekseninin toplam stroğu (m) */
+  zTravel: number;
+  tool: string | null;
   target: { x: number; y: number; z: number };
 }) {
   const gantry = useRef<Group>(null);
@@ -769,8 +971,10 @@ function RobotRig({
       carriage.current.position.z += (target.y - carriage.current.position.z) * SMOOTHING;
     }
     if (zAxis.current) {
-      // Z aşağı iniyor; kolonun üst ucu aynı anda kirişin üstünde yükseliyor
-      const desired = -Math.abs(target.z);
+      // Z aşağı iniyor; kolonun üst ucu aynı anda kirişin üstünde yükseliyor.
+      // İniş strokla sınırlı: sınır dışı bir değer gelse bile uç kabın
+      // altından geçip görüntüyü bozmasın.
+      const desired = -Math.min(Math.abs(target.z), zTravel);
       zAxis.current.position.y += (desired - zAxis.current.position.y) * SMOOTHING;
     }
   });
@@ -841,23 +1045,22 @@ function RobotRig({
               çubuk bu.
             */}
             <Extrusion
-              size={[PROFILE, portal * 1.7, PROFILE]}
-              position={[PROFILE * 1.6, beamY + portal * 0.35, 0]}
+              size={[PROFILE, portal * 1.9, PROFILE]}
+              position={[PROFILE * 1.6, beamY + portal * 0.42, 0]}
             />
             {/* Z motoru kolonun tepesinde */}
             <Motor
               position={[PROFILE * 1.6, beamY + portal * 1.2, 0]}
               rotation={[Math.PI / 2, 0, 0]}
             />
-            {/* Alet başlığı */}
-            <mesh position={[PROFILE * 1.6, beamY - portal * 0.5, 0]} castShadow>
-              <boxGeometry args={[PROFILE * 1.6, PROFILE * 2, PROFILE * 1.6]} />
-              <meshStandardMaterial {...DARK_PART} />
-            </mesh>
-            <mesh position={[PROFILE * 1.6, beamY - portal * 0.5 - PROFILE * 1.4, 0]} castShadow>
-              <cylinderGeometry args={[PROFILE * 0.5, PROFILE * 0.3, PROFILE * 1.6, 16]} />
-              <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={0.3} />
-            </mesh>
+            {/*
+              Değiştirilebilir uç, Z kolonunun alt ucuna takılı. Kolon aşağı
+              indikçe uç toprağa yaklaşıyor; kirişin yüksekliği de bu ucun boyu
+              hesaba katılarak belirlendi (bkz. `portal`).
+            */}
+            <group position={[PROFILE * 1.6, toolRestY, 0]}>
+              <ToolHead kind={tool} />
+            </group>
           </group>
         </group>
       </group>
