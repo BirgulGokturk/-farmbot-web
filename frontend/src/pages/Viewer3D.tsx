@@ -868,11 +868,13 @@ function Scene({
         z={length * 0.22}
       />
 
-      {/* Elektrik kutusu — X rayının ucundaki çıkıntıda */}
+      {/* Elektrik kutusu — X uzantısının ucunda, **ön raya asılı**.
+          Önce iki rayın tam ortasına konmuştu: hiçbirine değmiyor, havada
+          duruyordu. Kutu raydan aşağı sarkar, üstüne binmez. */}
       <ControlEnclosure
         x={-PROFILE * 4.5}
-        y={benchHeight + PROFILE * 2}
-        z={length * 0.5}
+        y={benchHeight - PROFILE * 2.5}
+        z={-PROFILE * 2.5}
       />
 
       {/* Bekleyen uçların askısı — kabın uzak ucunda, toprağın üstünde durur.
@@ -979,6 +981,15 @@ function RobotRig({
           position={[width / 2 - PROFILE * 3, benchHeight + PROFILE, z]}
         />
       ))}
+      {/* Kutuyu ön raya bağlayan askı */}
+      <mesh
+        position={[-PROFILE * 4.5, benchHeight + PROFILE * 0.5, -PROFILE * 0.6]}
+        castShadow
+      >
+        <boxGeometry args={[PROFILE * 3, PROFILE * 1.6, PROFILE * 0.5]} />
+        <meshStandardMaterial {...DARK_PART} />
+      </mesh>
+
       {/* Çıkıntıyı çerçeveye bağlayan enine profil */}
       <Extrusion
         size={[PROFILE, PROFILE, length]}
