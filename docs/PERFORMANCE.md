@@ -30,15 +30,56 @@ LCP 0,4 sn · Speed Index 0,5 sn.
 
 ## Sonuç — panel (`/viewer`, oturum açık)
 
-| Metrik (mobil, Slow 4G, CPU 4x) | Önce | Sonra |
-| --- | --- | --- |
-| Performans skoru | 77 | ölçülmedi (aşağıdaki nota bakın) |
-| Total Blocking Time | 1.016 ms | **726 ms** |
-| Sahne durgunken CPU | kare başına ~20 ms, hiç durmuyor | **0 — sahne duruyor** |
+| Metrik (mobil, Slow 4G, CPU 4x) | Değer |
+| --- | --- |
+| Performans skoru | **67** |
+| Largest Contentful Paint | 4,0 sn |
+| Total Blocking Time | 810 ms (düzeltme öncesi 1.016 ms) |
+| Cumulative Layout Shift | 0.001 |
+| Sahne durgunken CPU | **0 — sahne duruyor** (önce: kare başına ~20 ms, hiç durmuyor) |
 
-Panelin skoru `frameloop` düzeltmesinden sonra yeniden ölçülmedi; elimizdeki
-karşılaştırma DevTools performans kayıtlarından çıkan TBT değerleri. Skorun da
-düzelmiş olması beklenir ama doğrulanmadı.
+Erişilebilirlik, En İyi Uygulamalar ve SEO burada da 100. Masaüstünde panel
+sorunsuz; sıkıntı yalnızca mobil kısıtlamada.
+
+**Arada gördüğümüz 77'ye güvenmeyin.** O turda `Viewer3D` chunk'ı tarayıcı
+önbelleğinden gelmişti (`transferSize: 0`); 67 ise paketin gerçekten indirildiği
+soğuk ölçüm. Aradaki 10 puan bir gerileme değil, önbellek farkı. Rapor
+karşılaştırırken `network-requests` içinde chunk'ın transfer boyutuna bakın.
+
+### Neden mobilde zor — ve neyin yapılamayacağı
+
+`Viewer3D` chunk'ı 923 KB (gzip 244 KiB). Kaynak haritasından çıkan döküm:
+
+| Kaynak | Boyut | Pay |
+| --- | --- | --- |
+| `three/build/three.core.js` | 371,9 KB | 49,6% |
+| `three/build/three.module.js` | 187,6 KB | 25,0% |
+| `@react-three/fiber` | 144,3 KB | 19,2% |
+| **kütüphane toplamı** | **703,8 KB** | **93,8%** |
+| `src/pages/Viewer3D.tsx` | 16,8 KB | 2,2% |
+| drei (Html, Grid, OrbitControls) | ~8 KB | ~1% |
+
+Paketi küçültmek mümkün değil: kendi kodumuzun tamamını silsek kazanç %6.
+Masaüstünde 244 KiB anında iner, Slow 4G'de 1,2 saniye sürer ve LCP'yi doğrudan
+4 saniyeye taşır. Bu bir hata değil, mobil bağlantıda 3B sahne göstermenin
+bedeli.
+
+### Yapılan: paketi önden ısıtma
+
+Paket küçültülemediği için indirme anını öne aldık. Oturum açıkken tarayıcı
+boşa düştüğü ilk anda (`requestIdleCallback`, en geç 4 sn) `Viewer3D` arka
+planda iniyor — bkz. `usePrefetchViewer`, `src/App.tsx`.
+
+Gerçek kullanım akışı giriş → panel → 3B görünüm olduğu için, menüden geçen
+kullanıcı artık hiç beklemiyor. Doğrudan `/viewer` adresini açan birine faydası
+yok.
+
+**Lighthouse skorunu değiştirmez** ve değiştirmesi de beklenmiyor: PageSpeed
+giriş ekranını ölçüyor, DevTools ölçümü de soğuk başlıyor. Ölçüme yansımayan,
+kullanımda hissedilen bir iyileştirme.
+
+Üç durumda atlanıyor: giriş ekranındayken (o sayfanın skoru 99, bozmaya
+değmez), `navigator.connection.saveData` açıkken, ve 2G bağlantıda.
 
 ## Sorun 1 — React yanlış chunk'ın içine hapsolmuştu
 
@@ -198,7 +239,13 @@ kapatmak denenebilir.
 
 ## Ölçüm yaparken
 
-Bu bölümdeki dört madde de çalışma sırasında bizzat yanlış sonuca götürdü.
+Bu bölümdeki beş madde de çalışma sırasında bizzat yanlış sonuca götürdü.
+
+**Chunk'ın önbellekten mi geldiğine bakın.** Panel bir turda 77, sonrakinde 67
+verdi ve arada gerileme yaratacak bir değişiklik yoktu; ilk turda `Viewer3D`
+chunk'ı önbellekten gelmiş, `transferSize` 0 görünüyordu. Soğuk ölçüm 67. İki
+raporu karşılaştırırken `network-requests` içindeki toplam transfer boyutuna
+bakın — 192,9 KiB ile 441,1 KiB aynı sayfa değildir.
 
 **Tek ölçüme güvenmeyin.** Render ücretsiz katmanının yanıt süresi değişken;
 statik dosyada bile ardışık sekiz istekte TTFB 110-260 ms arasında gezindi ve
