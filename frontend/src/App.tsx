@@ -37,6 +37,62 @@ function PageFallback() {
   );
 }
 
+/**
+ * 3B görünümün paketini boşta kalan zamanda önden indirir.
+ *
+ * Viewer3D chunk'ı 244 KiB (gzip) ve %94'ü three.js — kesilecek yer yok.
+ * Ama gerçek kullanım akışı giriş → panel → 3B görünüm olduğu için, kullanıcı
+ * menüden tıklamadan önce paketi çekersek bekleme sıfırlanıyor. Slow 4G'de
+ * ölçülen indirme süresi 1,2 saniyeydi.
+ *
+ * Üç durumda atlanıyor:
+ *   - Giriş ekranındayken; orada indirilen her bayt ilk boyamayla yarışır ve
+ *     o sayfanın skoru 99, bozmaya değmez.
+ *   - Kullanıcı veri tasarrufu açtıysa.
+ *   - Bağlantı 2G ise; böyle bir hatta 244 KiB'ı önden çekmek yardım değil
+ *     köstek olur.
+ */
+function usePrefetchViewer(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+
+    const connection = (
+      navigator as Navigator & {
+        connection?: { saveData?: boolean; effectiveType?: string };
+      }
+    ).connection;
+    if (connection?.saveData) return;
+    if (connection?.effectiveType && connection.effectiveType.endsWith("2g")) return;
+
+    let cancelled = false;
+    const warm = () => {
+      if (cancelled) return;
+      // Aynı dinamik import lazy() tarafından da kullanılıyor; paketleyici
+      // tekilleştirdiği için ikinci kez indirilmiyor, modül önbelleğe giriyor.
+      //
+      // Hata sessizce yutuluyor: bu yalnızca bir hızlandırma. İndirme
+      // başarısız olursa kullanıcı 3B görünüme geçtiğinde lazy() zaten tekrar
+      // deneyecek; buradan konsola hata basmanın kimseye faydası yok.
+      void import("@/pages/Viewer3D").catch(() => {});
+    };
+
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(warm, { timeout: 4000 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback?.(id);
+      };
+    }
+
+    // Safari'de requestIdleCallback yok; sayfanın kendi işi bitsin diye bekliyoruz.
+    const timer = window.setTimeout(warm, 2000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [enabled]);
+}
+
 export default function App() {
   const status = useAuth((s) => s.status);
   const restore = useAuth((s) => s.restore);
@@ -44,6 +100,8 @@ export default function App() {
   useEffect(() => {
     void restore();
   }, [restore]);
+
+  usePrefetchViewer(status === "authenticated");
 
   if (status === "loading") {
     return (
