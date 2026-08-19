@@ -24,6 +24,7 @@ import {
   Select,
   Toggle,
 } from "@/components/ui/primitives";
+import { NumberField } from "@/components/ui/NumberField";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import {
@@ -196,18 +197,18 @@ export default function ToolZone() {
 
         {/* ---------------- Ayarlar ---------------- */}
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Sayi label="Güvenli Z (mm)" value={zone.safe_z} onChange={(v) => alan("safe_z", v)} />
-          <Sayi
+          <NumberField label="Güvenli Z (mm)" value={zone.safe_z} onChange={(v) => alan("safe_z", v)} />
+          <NumberField
             label="Varlık yazmacı (D)"
             value={zone.presence_reg}
             onChange={(v) => alan("presence_reg", v)}
           />
-          <Sayi
+          <NumberField
             label="Z-güvenli yazmacı (D)"
             value={zone.z_safe_reg}
             onChange={(v) => alan("z_safe_reg", v)}
           />
-          <Sayi
+          <NumberField
             label="Değiştirme hızı mm/s"
             value={zone.change_speed}
             onChange={(v) => alan("change_speed", v)}
@@ -224,23 +225,23 @@ export default function ToolZone() {
             <option value="y">Y</option>
             <option value="x">X</option>
           </Select>
-          <Sayi
+          <NumberField
             label="Yaklaşma ofseti"
             value={zone.approach_offset}
             onChange={(v) => alan("approach_offset", v)}
           />
-          <Sayi
+          <NumberField
             label="Geçiş Z (uçları aşar)"
             value={zone.travel_z}
             onChange={(v) => alan("travel_z", v)}
           />
-          <Sayi label="Kaldırma (mm)" value={zone.lift_mm} onChange={(v) => alan("lift_mm", v)} />
-          <Sayi
+          <NumberField label="Kaldırma (mm)" value={zone.lift_mm} onChange={(v) => alan("lift_mm", v)} />
+          <NumberField
             label="Kilit servo yazmacı (D)"
             value={zone.lock_servo_reg}
             onChange={(v) => alan("lock_servo_reg", v)}
           />
-          <Sayi
+          <NumberField
             label="Kilit gecikmesi (ms)"
             value={zone.lock_delay_ms}
             onChange={(v) => alan("lock_delay_ms", v)}
@@ -325,13 +326,10 @@ export default function ToolZone() {
                     </td>
                     {(["x", "y", "z"] as const).map((eksen) => (
                       <td key={eksen} className="py-2 pr-2">
-                        <Input
+                        <NumberField
                           name={`${eksen}-${index}`}
-                          inputMode="decimal"
-                          value={String(slot[eksen])}
-                          onChange={(e) =>
-                            yuvaDegistir(index, { [eksen]: Number(e.target.value) || 0 })
-                          }
+                          value={slot[eksen]}
+                          onChange={(v) => yuvaDegistir(index, { [eksen]: v })}
                         />
                       </td>
                     ))}
@@ -438,13 +436,10 @@ export default function ToolZone() {
                   </td>
                   {(["x1", "y1", "x2", "y2"] as const).map((k) => (
                     <td key={k} className="py-2 pr-2">
-                      <Input
+                      <NumberField
                         name={`${k}-${index}`}
-                        inputMode="decimal"
-                        value={String(box[k])}
-                        onChange={(e) =>
-                          bolgeDegistir(index, { [k]: Number(e.target.value) || 0 })
-                        }
+                        value={box[k]}
+                        onChange={(v) => bolgeDegistir(index, { [k]: v })}
                       />
                     </td>
                   ))}
@@ -496,12 +491,12 @@ export default function ToolZone() {
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
           {zone.change_area.corners.map((kose, index) => (
             <Fragment key={index}>
-              <Sayi
+              <NumberField
                 label={`X${index + 1}`}
                 value={kose[0]}
                 onChange={(v) => koseDegistir(index, 0, v)}
               />
-              <Sayi
+              <NumberField
                 label={`Y${index + 1}`}
                 value={kose[1]}
                 onChange={(v) => koseDegistir(index, 1, v)}
@@ -601,30 +596,6 @@ export default function ToolZone() {
       },
     }));
   }
-}
-
-/** Sayı kutusu — boş bırakılınca 0'a düşmesin diye taslak tutuyor. */
-function Sayi({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <Input
-      name={label}
-      label={label}
-      inputMode="decimal"
-      value={String(value)}
-      onChange={(e) => {
-        const parsed = Number(e.target.value);
-        onChange(Number.isFinite(parsed) ? parsed : 0);
-      }}
-    />
-  );
 }
 
 /**

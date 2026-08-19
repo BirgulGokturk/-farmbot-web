@@ -10,6 +10,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Move3d, Sprout, SquareDashed } from "lucide-react";
 
 import { Button, Card, CardHeader, Input, Toggle } from "@/components/ui/primitives";
+import { NumberField } from "@/components/ui/NumberField";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { readMachineConfig, type PlantingArea, type SeederConfig } from "@/lib/machine";
@@ -41,7 +42,9 @@ function OptionalNumber({
         // Boş kutuyu 0'a çevirmiyoruz: 0 geçerli bir kenar ve kullanıcı
         // "sınır yok" demek isterken alanı sıfırdan başlatmış olurdu.
         if (raw === "") return onChange(null);
-        const parsed = Number(raw);
+        // Türkçe klavyede ondalık ayırıcı virgül; noktaya çevirmezsek
+        // `Number` NaN döner ve girilen ölçü sessizce yok sayılırdı.
+        const parsed = Number(raw.replace(",", "."));
         onChange(Number.isFinite(parsed) ? parsed : null);
       }}
     />
@@ -178,12 +181,11 @@ export function TravelSettings({ device }: { device: Device }) {
       />
 
       <div className="mt-3 space-y-2">
-        <Input
+        <NumberField
           name="safe-height"
           label="Güvenli yükseklik Z (mm)"
-          inputMode="numeric"
-          value={height}
-          onChange={(e) => setHeight(e.target.value)}
+          value={Number(height) || 0}
+          onChange={(v) => setHeight(String(v))}
         />
         <Button
           size="sm"
@@ -243,15 +245,11 @@ export function SeederSettings({ device }: { device: Device }) {
 
   function num(key: keyof SeederConfig, label: string, suffix = "") {
     return (
-      <Input
+      <NumberField
         name={String(key)}
         label={`${label}${suffix}`}
-        inputMode="numeric"
-        value={String(seeder[key])}
-        onChange={(e) => {
-          const parsed = Number(e.target.value);
-          setSeeder({ ...seeder, [key]: Number.isFinite(parsed) ? parsed : 0 });
-        }}
+        value={Number(seeder[key]) || 0}
+        onChange={(v) => setSeeder({ ...seeder, [key]: v })}
       />
     );
   }

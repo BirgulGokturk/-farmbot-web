@@ -31,6 +31,7 @@ import {
   Skeleton,
   Toggle,
 } from "@/components/ui/primitives";
+import { NumberField } from "@/components/ui/NumberField";
 import { toast } from "@/components/ui/toast";
 import {
   GardenCanvas,
@@ -901,25 +902,29 @@ function PointInspector({
             <NumberField
               label="X (mm)"
               value={point.x}
-              onCommit={(x) => onChange({ x })}
+              commitOn="blur"
+              onChange={(x) => onChange({ x })}
             />
             <NumberField
               label="Y (mm)"
               value={point.y}
-              onCommit={(y) => onChange({ y })}
+              commitOn="blur"
+              onChange={(y) => onChange({ y })}
             />
             <NumberField
               label="Z (mm)"
               value={point.z}
-              onCommit={(z) => onChange({ z })}
+              commitOn="blur"
+              onChange={(z) => onChange({ z })}
             />
           </div>
           <NumberField
             label="Yayılma çapı (mm)"
             value={Math.round(point.radius_mm * 2)}
             min={1}
+            commitOn="blur"
             /* Kullanıcı çapı düşünüyor, veritabanı yarıçapı tutuyor */
-            onCommit={(diameter) => onChange({ radius_mm: diameter / 2 })}
+            onChange={(diameter) => onChange({ radius_mm: diameter / 2 })}
           />
         </div>
 
@@ -1107,61 +1112,6 @@ function SowPanel({
         </Button>
       </div>
     </Card>
-  );
-}
-
-/**
- * Sayı alanı — yazarken değil, **bitirince** kaydeder.
- *
- * Her tuşta kaydetseydik "1200" yazarken sırayla 1, 12, 120 kaydedilir ve
- * robot bir anlığına bahçenin başka bir yerine ait bir koordinat görürdü.
- * Bu yüzden yerel bir taslak tutuluyor; kayıt yalnızca odak çıkınca ya da
- * Enter'a basınca yapılıyor. Escape taslağı atıp sunucudaki değere döner.
- */
-function NumberField({
-  label,
-  value,
-  onCommit,
-  min,
-}: {
-  label: string;
-  value: number;
-  onCommit: (value: number) => void;
-  min?: number;
-}) {
-  const [draft, setDraft] = useState(String(Math.round(value)));
-
-  // Dışarıdan değişince (sürükleme, geri alma) taslağı tazele
-  useEffect(() => setDraft(String(Math.round(value))), [value]);
-
-  function commit() {
-    const parsed = Number(draft);
-    // Geçersiz ya da değişmemişse dokunma: boş bırakılan bir kutu yüzünden
-    // bitkinin koordinatı 0'a düşmesin
-    if (!Number.isFinite(parsed) || parsed === Math.round(value)) {
-      setDraft(String(Math.round(value)));
-      return;
-    }
-    if (min !== undefined && parsed < min) {
-      setDraft(String(Math.round(value)));
-      return;
-    }
-    onCommit(parsed);
-  }
-
-  return (
-    <Input
-      name={label}
-      label={label}
-      inputMode="numeric"
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") setDraft(String(Math.round(value)));
-      }}
-    />
   );
 }
 
