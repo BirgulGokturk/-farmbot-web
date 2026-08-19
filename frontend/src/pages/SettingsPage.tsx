@@ -14,6 +14,11 @@ import {
 import { toast } from "@/components/ui/toast";
 import { AgentSetup } from "@/components/settings/AgentSetup";
 import { Calibration } from "@/components/settings/Calibration";
+import {
+  PlantingAreaSettings,
+  SeederSettings,
+  TravelSettings,
+} from "@/components/settings/Planting";
 import { AlertRules } from "@/components/settings/AlertRules";
 import { InstallApp } from "@/components/settings/InstallApp";
 import { api } from "@/lib/api";
@@ -41,6 +46,9 @@ export default function SettingsPage() {
         {device && <DeviceSettings device={device} />}
         {device && <WorkspaceSettings device={device} />}
         {device && <Calibration device={device} />}
+        {device && <TravelSettings device={device} />}
+        {device && <PlantingAreaSettings device={device} />}
+        {device && <SeederSettings device={device} />}
         <AgentSetup />
         <HardwareSettings />
         <InstallApp />

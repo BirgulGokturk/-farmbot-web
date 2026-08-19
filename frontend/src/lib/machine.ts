@@ -49,13 +49,54 @@ export interface ViewerConfig {
   show_labels: boolean;
 }
 
+/**
+ * Ekilebilir dikdörtgen — yatağın kenarıyla toprağın başladığı yer aynı değil.
+ *
+ * Kenarda profil, kablo kanalı, saksı duvarı gibi boşluklar var; tohumu oraya
+ * bırakırsak toprağa değil metale düşer. `null` = o kenarda sınır yok, yani
+ * yatağın kendi ölçüsü geçerli.
+ */
+export interface PlantingArea {
+  x_min_mm: number | null;
+  x_max_mm: number | null;
+  y_min_mm: number | null;
+  y_max_mm: number | null;
+}
+
+/** Vakumlu tohum ucu — tepsi konumu ve bekleme süreleri. */
+export interface SeederConfig {
+  enabled: boolean;
+  vacuum_pin: number;
+  tray_x_mm: number;
+  tray_y_mm: number;
+  tray_z_mm: number;
+  pick_dwell_ms: number;
+  release_dwell_ms: number;
+  default_depth_mm: number;
+}
+
 export interface MachineConfig {
   axes: Record<AxisName, AxisConfig>;
   /** Yumuşak sınırlar uygulansın mı? Kapalıyken hiçbir hedef reddedilmez. */
   limits_enabled: boolean;
   tool_zone: ToolZoneConfig;
   viewer: ViewerConfig;
+  planting_area: PlantingArea;
+  /** X/Y hareketinden önce uç güvenli yüksekliğe çekilsin mi? */
+  travel_guard: boolean;
+  seeder: SeederConfig;
 }
+
+export const SEEDER_DEFAULTS: SeederConfig = {
+  enabled: false,
+  vacuum_pin: 9,
+  tray_x_mm: 0,
+  tray_y_mm: 0,
+  tray_z_mm: 0,
+  pick_dwell_ms: 800,
+  release_dwell_ms: 500,
+  default_depth_mm: 15,
+};
 
 export const AXIS_DEFAULTS: AxisConfig = {
   // Boş alanlar "makineninkini kullan" demek; varsayılan bir sayı koymak
@@ -127,6 +168,8 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
   const rawAxes = (source.axes ?? {}) as Record<string, unknown>;
   const rawZone = (source.tool_zone ?? {}) as Record<string, unknown>;
   const rawViewer = (source.viewer ?? {}) as Record<string, unknown>;
+  const rawArea = (source.planting_area ?? {}) as Record<string, unknown>;
+  const rawSeeder = (source.seeder ?? {}) as Record<string, unknown>;
 
   return {
     limits_enabled: source.limits_enabled !== false,
@@ -159,6 +202,23 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
       font_scale: num(rawViewer.font_scale, VIEWER_DEFAULTS.font_scale),
       show_grid: rawViewer.show_grid !== false,
       show_labels: rawViewer.show_labels !== false,
+    },
+    planting_area: {
+      x_min_mm: optionalNum(rawArea.x_min_mm),
+      x_max_mm: optionalNum(rawArea.x_max_mm),
+      y_min_mm: optionalNum(rawArea.y_min_mm),
+      y_max_mm: optionalNum(rawArea.y_max_mm),
+    },
+    travel_guard: ((source.travel ?? {}) as Record<string, unknown>).enabled !== false,
+    seeder: {
+      enabled: Boolean(rawSeeder.enabled),
+      vacuum_pin: num(rawSeeder.vacuum_pin, SEEDER_DEFAULTS.vacuum_pin),
+      tray_x_mm: num(rawSeeder.tray_x_mm, 0),
+      tray_y_mm: num(rawSeeder.tray_y_mm, 0),
+      tray_z_mm: num(rawSeeder.tray_z_mm, 0),
+      pick_dwell_ms: num(rawSeeder.pick_dwell_ms, SEEDER_DEFAULTS.pick_dwell_ms),
+      release_dwell_ms: num(rawSeeder.release_dwell_ms, SEEDER_DEFAULTS.release_dwell_ms),
+      default_depth_mm: num(rawSeeder.default_depth_mm, SEEDER_DEFAULTS.default_depth_mm),
     },
   };
 }

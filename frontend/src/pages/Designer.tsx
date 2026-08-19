@@ -607,6 +607,10 @@ export default function Designer() {
               </div>
             </Card>
           )}
+
+          <div className="mt-4">
+            <SowPanel species={species ?? []} onDone={refreshPoints} />
+          </div>
         </div>
       </div>
 
@@ -822,7 +826,14 @@ function PointInspector({
   point: Point;
   viewDate: Date;
   curves: Map<string, import("@/lib/types").Curve>;
-  onChange: (patch: { name?: string; stage?: PlantStage }) => void;
+  onChange: (patch: {
+    name?: string;
+    stage?: PlantStage;
+    x?: number;
+    y?: number;
+    z?: number;
+    radius_mm?: number;
+  }) => void;
   onDelete: () => void;
 }) {
   const deviceId = useDeviceId();
@@ -878,6 +889,39 @@ function PointInspector({
             </option>
           ))}
         </Select>
+
+        {/* Konum ve yayılma — sürüklemek her zaman yeterli değil.
+            Sahada şerit metreyle ölçülen bir konumu tam sayı olarak girmek
+            gerekiyor; fareyle 1 mm hassasiyet tutturmak mümkün değil. */}
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted">
+            Konum ve yayılma
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            <NumberField
+              label="X (mm)"
+              value={point.x}
+              onCommit={(x) => onChange({ x })}
+            />
+            <NumberField
+              label="Y (mm)"
+              value={point.y}
+              onCommit={(y) => onChange({ y })}
+            />
+            <NumberField
+              label="Z (mm)"
+              value={point.z}
+              onCommit={(z) => onChange({ z })}
+            />
+          </div>
+          <NumberField
+            label="Yayılma çapı (mm)"
+            value={Math.round(point.radius_mm * 2)}
+            min={1}
+            /* Kullanıcı çapı düşünüyor, veritabanı yarıçapı tutuyor */
+            onCommit={(diameter) => onChange({ radius_mm: diameter / 2 })}
+          />
+        </div>
 
         {/* Seçilen tarihteki durumu */}
         <div className="rounded-xl border border-brand/25 bg-brand/8 p-3.5">
@@ -941,6 +985,183 @@ function PointInspector({
         </Button>
       </div>
     </Card>
+  );
+}
+
+/**
+ * Tohum ekim paneli — rastgele serpiştirme ve vakumlu uçla ekim.
+ *
+ * Neden rastgele: bahçeyi tek tek tıklayarak doldurmak yüz bitkide yüz tıklama
+ * demek. Serpiştirme, aralık kuralına uyan bir yerleşimi tek adımda üretiyor;
+ * kullanıcı sonra beğenmediğini sürükleyip düzeltiyor.
+ */
+function SowPanel({
+  species,
+  onDone,
+}: {
+  species: PlantSpecies[];
+  onDone: () => void;
+}) {
+  const deviceId = useDeviceId();
+  const [speciesId, setSpeciesId] = useState("");
+  const [count, setCount] = useState("10");
+  const [spread, setSpread] = useState("");
+
+  const selected = species.find((item) => item.id === speciesId) ?? species[0];
+
+  useEffect(() => {
+    if (!speciesId && species.length) setSpeciesId(species[0].id);
+  }, [species, speciesId]);
+
+  const scatter = useMutation({
+    mutationFn: () =>
+      api.points.scatter(deviceId!, {
+        species_id: speciesId,
+        count: Number(count) || 1,
+        // Boş bırakılırsa türün katalogdaki aralığı kullanılsın
+        spread_mm: spread ? Number(spread) : undefined,
+      }),
+    onSuccess: (result) => {
+      onDone();
+      // Alan dolduysa bunu **söylüyoruz**: sessizce eksik ekmek, kullanıcının
+      // sonradan sayarak fark edeceği bir sürpriz olurdu.
+      if (result.skipped) toast.warning("Alan doldu", result.detail);
+      else toast.success("Ekim planlandı", result.detail);
+    },
+    onError: (error) => toast.error("Serpiştirilemedi", (error as Error).message),
+  });
+
+  const sow = useMutation({
+    mutationFn: () => api.control.sow(deviceId!, {}),
+    onSuccess: (result) => {
+      onDone();
+      toast.success("Ekim başladı", result.detail ?? undefined);
+    },
+    onError: (error) => toast.error("Ekim başlatılamadı", (error as Error).message),
+  });
+
+  return (
+    <Card>
+      <CardHeader
+        title="Tohum Ekimi"
+        subtitle="Vakumlu uç"
+        icon={<Sprout className="size-4" />}
+      />
+
+      <div className="space-y-3">
+        <Select
+          name="scatter-species"
+          label="Tür"
+          value={speciesId}
+          onChange={(e) => setSpeciesId(e.target.value)}
+        >
+          {species.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.icon} {item.name_tr}
+            </option>
+          ))}
+        </Select>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Input
+            name="scatter-count"
+            label="Adet"
+            inputMode="numeric"
+            value={count}
+            onChange={(e) => setCount(e.target.value)}
+          />
+          <Input
+            name="scatter-spread"
+            label="Yayılma (mm)"
+            inputMode="numeric"
+            placeholder={selected ? String(selected.spread_mm) : "200"}
+            value={spread}
+            onChange={(e) => setSpread(e.target.value)}
+          />
+        </div>
+
+        <Button
+          fullWidth
+          icon={<Radar className="size-4" />}
+          loading={scatter.isPending}
+          disabled={!speciesId}
+          onClick={() => scatter.mutate()}
+        >
+          Rastgele Serpiştir
+        </Button>
+
+        <div className="rounded-xl bg-surface-2 p-3 text-xs leading-relaxed text-subtle">
+          Serpiştirme yalnızca <strong>plan</strong> üretir; robot hareket etmez.
+          Yerleşimi beğendikten sonra aşağıdaki düğme, planlanan tohumları
+          vakumlu uçla tek tek eker.
+        </div>
+
+        <Button
+          variant="primary"
+          fullWidth
+          icon={<Sprout className="size-4" />}
+          loading={sow.isPending}
+          onClick={() => sow.mutate()}
+        >
+          Planlananları Ek
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Sayı alanı — yazarken değil, **bitirince** kaydeder.
+ *
+ * Her tuşta kaydetseydik "1200" yazarken sırayla 1, 12, 120 kaydedilir ve
+ * robot bir anlığına bahçenin başka bir yerine ait bir koordinat görürdü.
+ * Bu yüzden yerel bir taslak tutuluyor; kayıt yalnızca odak çıkınca ya da
+ * Enter'a basınca yapılıyor. Escape taslağı atıp sunucudaki değere döner.
+ */
+function NumberField({
+  label,
+  value,
+  onCommit,
+  min,
+}: {
+  label: string;
+  value: number;
+  onCommit: (value: number) => void;
+  min?: number;
+}) {
+  const [draft, setDraft] = useState(String(Math.round(value)));
+
+  // Dışarıdan değişince (sürükleme, geri alma) taslağı tazele
+  useEffect(() => setDraft(String(Math.round(value))), [value]);
+
+  function commit() {
+    const parsed = Number(draft);
+    // Geçersiz ya da değişmemişse dokunma: boş bırakılan bir kutu yüzünden
+    // bitkinin koordinatı 0'a düşmesin
+    if (!Number.isFinite(parsed) || parsed === Math.round(value)) {
+      setDraft(String(Math.round(value)));
+      return;
+    }
+    if (min !== undefined && parsed < min) {
+      setDraft(String(Math.round(value)));
+      return;
+    }
+    onCommit(parsed);
+  }
+
+  return (
+    <Input
+      name={label}
+      label={label}
+      inputMode="numeric"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") setDraft(String(Math.round(value)));
+      }}
+    />
   );
 }
 

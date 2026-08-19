@@ -138,6 +138,15 @@ export interface PlantSpecies {
   notes: string | null;
 }
 
+/** Rastgele serpiştirme sonucu — alan dolduysa `skipped` kaç tane sığmadığını söyler. */
+export interface ScatterResult {
+  created: Point[];
+  requested: number;
+  placed: number;
+  skipped: number;
+  detail: string;
+}
+
 export interface Point {
   id: string;
   device_id: string;

@@ -26,6 +26,7 @@ import type {
   Peripheral,
   PlantSpecies,
   Point,
+  ScatterResult,
   PointCreate,
   PointUpdate,
   Sensor,
@@ -326,6 +327,20 @@ export const api = {
     /** Yumuşak silinmiş noktayı geri getirir — geri alma bunu kullanır. */
     restore: (deviceId: string, pointId: string) =>
       request<Point>(`/devices/${deviceId}/points/${pointId}/restore`, { method: "POST" }),
+    /** Ekim alanına rastgele, üst üste binmeyecek şekilde bitki serpiştirir. */
+    scatter: (
+      deviceId: string,
+      input: {
+        species_id: string;
+        count?: number;
+        spread_mm?: number;
+        avoid_existing?: boolean;
+      },
+    ) =>
+      request<ScatterResult>(`/devices/${deviceId}/points/scatter`, {
+        method: "POST",
+        body: input,
+      }),
   },
 
   catalog: {
@@ -525,6 +540,15 @@ export const api = {
       request<CommandResponse>(`/devices/${deviceId}/control/servo`, {
         method: "POST",
         body: { pin, angle },
+      }),
+    /** Vakumlu uçla tohum eker. `point_ids` boşsa planlanan tüm bitkiler. */
+    sow: (
+      deviceId: string,
+      input: { point_ids?: string[]; speed?: number; mark_planted?: boolean } = {},
+    ) =>
+      request<CommandResponse>(`/devices/${deviceId}/control/sow`, {
+        method: "POST",
+        body: input,
       }),
     water: (
       deviceId: string,
