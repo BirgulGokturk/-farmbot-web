@@ -3,10 +3,14 @@
 HMI'nin ilk yükleme performansı üzerine yapılan çalışmanın kaydı: hangi sorunlar
 vardı, neden oluştular, ne değişti.
 
-Ölçüm aracı PageSpeed Insights (Lighthouse), hedef sayfa `/viewer`. Oturum
-açılmamışken bu adres giriş ekranına düştüğü için ölçülen aslında giriş ekranıdır.
+**İki ayrı sayfa ölçüldü, karıştırmayın:**
 
-## Sonuç
+- **Giriş ekranı.** PageSpeed Insights `/viewer`'ı isteyince oturum açılmamış
+  olduğu için giriş ekranına düşülüyor; ölçülen budur. Sorun 1-3 buna dair.
+- **Panel.** `/viewer`'ın kendisi, oturum açıkken. PageSpeed buraya giremez;
+  yalnızca Chrome DevTools'un Lighthouse paneli ölçebilir. Sorun 4 buna dair.
+
+## Sonuç — giriş ekranı
 
 | Metrik (mobil, Slow 4G) | Önce | Sonra |
 | --- | --- | --- |
@@ -21,7 +25,20 @@ açılmamışken bu adres giriş ekranına düştüğü için ölçülen aslınd
 | Toplam istek | 6 | **4** |
 | Üçüncü taraf origin | 2 | **0** |
 
-Masaüstünde FCP 0,3 sn · LCP 0,4 sn · Speed Index 0,5 sn.
+Erişilebilirlik, En İyi Uygulamalar ve SEO: 100. Masaüstünde FCP 0,3 sn ·
+LCP 0,4 sn · Speed Index 0,5 sn.
+
+## Sonuç — panel (`/viewer`, oturum açık)
+
+| Metrik (mobil, Slow 4G, CPU 4x) | Önce | Sonra |
+| --- | --- | --- |
+| Performans skoru | 77 | ölçülmedi (aşağıdaki nota bakın) |
+| Total Blocking Time | 1.016 ms | **726 ms** |
+| Sahne durgunken CPU | kare başına ~20 ms, hiç durmuyor | **0 — sahne duruyor** |
+
+Panelin skoru `frameloop` düzeltmesinden sonra yeniden ölçülmedi; elimizdeki
+karşılaştırma DevTools performans kayıtlarından çıkan TBT değerleri. Skorun da
+düzelmiş olması beklenir ama doğrulanmadı.
 
 ## Sorun 1 — React yanlış chunk'ın içine hapsolmuştu
 
@@ -103,6 +120,68 @@ alınıyor (bkz. `render.yaml`).
 
 Fontları yeniden üretmek için: `tools/subset-fonts.sh`
 
+## Sorun 4 — 3B sahne hiç durmadan yeniden çiziliyordu
+
+Bu, PageSpeed'in göremediği alanda: panelin kendisi.
+
+`<Canvas>` varsayılan `frameloop="always"` ile çalışıyordu, yani sahne saniyede
+60 kez yeniden çiziliyordu — robot dursa, kullanıcı hiçbir şeye dokunmasa bile.
+DevTools performans kaydında ölçülen: sahne kurulduktan sonra 63 animasyon
+karesi, toplam 1.291 ms CPU, kare başına ~20 ms ve kayıt bitene kadar hiç
+durmuyor.
+
+Durmamasının sebebi `RobotRig`'deki üstel yumuşatmaydı:
+
+```js
+position.x += (target.x - position.x) * SMOOTHING;
+```
+
+Bu hedefe asimptotik yaklaşır, matematiksel olarak asla varmaz; "animasyon
+bitti" diyebileceğimiz bir an oluşmuyordu.
+
+**Çözüm iki parçalı:**
+
+1. `SETTLE_EPSILON` (0,5 mm) eşiği — bu mesafenin altında hedefe yapışıp yeni
+   kare istemeyi bırakıyoruz.
+2. `frameloop="demand"` — çizim yalnızca istendiğinde yapılıyor. İsteği üç yer
+   üretiyor: sahne ağacı değişince react-three-fiber kendisi, kamera gezinirken
+   `OrbitControls` (drei `change` olayında `invalidate()` çağırıyor), ve robot
+   hareket ederken `useFrame`.
+
+**Kazanç:** TBT 1.016 → 726 ms, ve asıl önemlisi sahne durgunken **hiç kare
+çizilmiyor**. Ölçümde son kareden sonra 2,1 saniye tam sessizlik görüldü;
+öncesinde kayıt bittiği için duruyordu.
+
+Kiosk ekranında panel gün boyu açık kaldığı için faydası skordan çok burada.
+
+## Denendi ve geri alındı — shader ön derlemesi
+
+Panelin kalan 726 ms'lik TBT'sinin en büyük kalemi (200 ms) three.js'in shader
+programlarını derlemesi. Kaynak haritalarıyla çözülen döküm: `onFirstUse`
+26,8 ms, `cloneUniforms` 6,8 ms, `WebGLShader` 6,3 ms, `replaceLightNums`
+4,9 ms, `getParameters` 5,0 ms.
+
+Denenen: `renderer.compileAsync(scene, camera)` ile programları ilk çizimden
+önce, `KHR_parallel_shader_compile` uzantısı üzerinden bloklamadan derlemek;
+derleme sürerken Canvas'ı `frameloop="never"` ile bekletmek.
+
+**İşe yaramadı, geri alındı.** Ölçüm: TBT 726 → 707 ms (gürültü seviyesinde) ve
+`onFirstUse` maliyeti 26,8 → 26,6 ms — yani sürücü beklemesi hiç ortadan
+kalkmadı.
+
+İki sebep:
+
+- `compileAsync` önce `compile()`'ı **senkron** çağırıyor. Shader string
+  üretimi, uniform kopyalama gibi JS tarafı iş ortadan kalkmıyor, sadece başka
+  bir göreve taşınıyor.
+- `compile()` gölge geçişinin kullandığı `MeshDepthMaterial` varyantlarını
+  kapsamıyor. Sahnede `shadows` açık ve 28 mesh gölge düşürüyor; o programlar
+  yine ilk çizimde derleniyor.
+
+Aynı fikri tekrar denemek isteyen olursa: mesele gölge geçişinin depth-material
+varyantlarında. Onları da kapsayan bir ön derleme ya da gölgeleri tamamen
+kapatmak denenebilir.
+
 ## Pratikte ne değişti
 
 - **Sahada telefondan açan kullanıcı için.** Bahçedeki robotu kontrol etmek
@@ -114,15 +193,40 @@ Fontları yeniden üretmek için: `tools/subset-fonts.sh`
 - **Dış bağımlılık yok.** Google Fonts kesintisi veya engellenmesi tipografiyi
   etkilemiyor.
 - **CLS 0.** Yüklenirken düzen hiç kaymıyor.
+- **Boşta CPU tüketimi yok.** Panel açık durduğu sürece 3B sahne işlemciyi
+  meşgul etmiyor.
 
 ## Ölçüm yaparken
 
-Render ücretsiz katmanının yanıt süresi değişken. Statik dosyada bile ardışık
-sekiz istekte TTFB 110-260 ms arasında gezindi; Lighthouse'un Slow 4G
-kısıtlaması bu farkı büyütür. Tek ölçüme bakmayın, 2-3 tur çalıştırıp ortancayı
-alın.
+Bu bölümdeki dört madde de çalışma sırasında bizzat yanlış sonuca götürdü.
 
-Ayrıca ölçümün gerçekten güncel sürümü gördüğünü doğrulayın: deploy sırasında
-çalıştırılan bir Lighthouse turu eski build'i ölçebiliyor. Raporun ağ listesinde
-görünen `index-<hash>.js` adını canlıdaki `index.html` ile karşılaştırmak en
-kesin kontrol.
+**Tek ölçüme güvenmeyin.** Render ücretsiz katmanının yanıt süresi değişken;
+statik dosyada bile ardışık sekiz istekte TTFB 110-260 ms arasında gezindi ve
+Slow 4G kısıtlaması bu farkı büyütüyor. Aynı build üç ayrı turda 87, 84 ve 99
+verdi. 2-3 tur çalıştırıp ortancayı alın.
+
+**Ölçümün güncel sürümü gördüğünü doğrulayın.** Deploy sırasında çalıştırılan
+bir Lighthouse turu eski build'i ölçebiliyor — bir kez skorun "düştüğünü"
+sandık, meğer rapor font değişikliğinden önceki paketi ölçmüş. Raporun ağ
+listesindeki `index-<hash>.js` adını canlıdaki `index.html` ile karşılaştırmak
+en kesin kontrol.
+
+**DevTools Lighthouse'u gizli sekmede çalıştırın.** Normal pencerede tarayıcı
+eklentileri de ölçüme giriyor. Panelin ilk ölçümü 63 çıktı; sebebi sayfaya
+2,1 MB JavaScript enjekte eden bir eklentiydi ve tek başına 3.013 ms'lik bir
+uzun görev üretiyordu. Gizli sekmede aynı sayfa 77 verdi. Lighthouse zaten
+`runWarnings` altında uyarıyor, o uyarıyı görmezden gelmeyin.
+
+**Panelin kendisini ölçmek için DevTools şart.** PageSpeed Insights oturum
+açamadığı için hep giriş ekranını ölçer. Giriş ekranının 99 olması panel
+hakkında hiçbir şey söylemiyor.
+
+### Kaynak haritaları
+
+Üretim derlemesinde açık (`vite.config.ts`). Kapalıyken performans kaydındaki
+fonksiyon adları `C`, `Cl`, `xh` gibi geliyor ve hangi three.js işleminin pahalı
+olduğu anlaşılmıyor. Açıkken `onFirstUse`, `replaceLightNums`, `cloneUniforms`
+gibi gerçek adlar görünüyor — Sorun 4'ün teşhisi bununla mümkün oldu.
+
+Ziyaretçiye maliyeti yok: `.map` dosyaları yalnızca geliştirici araçları açıkken
+indiriliyor.
