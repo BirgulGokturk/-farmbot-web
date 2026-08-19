@@ -52,6 +52,7 @@ TOOL_ZONE_DEFAULTS: dict[str, Any] = {
 }
 
 VIEWER_DEFAULTS: dict[str, Any] = {
+    "camera_angle": "on-sol",  # bakış köşesi
     "robot_scale": 1.0,   # gantry gövdesinin boyut çarpanı
     "zoom": 1.0,          # kamera uzaklığı çarpanı
     "font_scale": 1.0,    # etiket yazı boyutu çarpanı
@@ -173,7 +174,9 @@ def normalize_tool_zone(raw: Any) -> dict[str, Any]:
 
 def normalize_viewer(raw: Any) -> dict[str, Any]:
     source = raw if isinstance(raw, dict) else {}
+    angle = source.get("camera_angle")
     return {
+        "camera_angle": angle if isinstance(angle, str) and angle else "on-sol",
         "robot_scale": _number(source.get("robot_scale"), 1.0, magnitude=(0.1, 5.0)),
         "zoom": _number(source.get("zoom"), 1.0, magnitude=(0.2, 5.0)),
         "font_scale": _number(source.get("font_scale"), 1.0, magnitude=(0.5, 3.0)),

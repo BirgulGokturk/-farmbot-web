@@ -97,3 +97,11 @@ services:
       - path: /assets/*
         name: Cache-Control
         value: public, max-age=31536000, immutable
+
+      # Yazı tipleri public/ altından geldiği için adlarında içerik özeti yok;
+      # kalıcı önbelleğe alınabilmeleri için ayrı kural gerekiyor.
+      # DİKKAT: dosyalar yeniden üretilirse adı da değiştirilmeli, yoksa
+      # tarayıcılar bir yıl boyunca eskisini kullanmaya devam eder.
+      - path: /fonts/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable

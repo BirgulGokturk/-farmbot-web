@@ -39,6 +39,8 @@ export interface ToolZoneConfig {
 }
 
 export interface ViewerConfig {
+  /** Bakış köşesi — sıfır noktasının ekranda nerede kalacağını belirler. */
+  camera_angle: string;
   robot_scale: number;
   zoom: number;
   font_scale: number;
@@ -74,6 +76,7 @@ export const TOOL_ZONE_DEFAULTS: ToolZoneConfig = {
 };
 
 export const VIEWER_DEFAULTS: ViewerConfig = {
+  camera_angle: "on-sol",
   robot_scale: 1,
   zoom: 1,
   font_scale: 1,
@@ -141,6 +144,10 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
         : [],
     },
     viewer: {
+      camera_angle:
+        typeof rawViewer.camera_angle === "string" && rawViewer.camera_angle
+          ? rawViewer.camera_angle
+          : VIEWER_DEFAULTS.camera_angle,
       robot_scale: num(rawViewer.robot_scale, VIEWER_DEFAULTS.robot_scale),
       zoom: num(rawViewer.zoom, VIEWER_DEFAULTS.zoom),
       font_scale: num(rawViewer.font_scale, VIEWER_DEFAULTS.font_scale),

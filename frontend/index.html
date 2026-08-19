@@ -18,30 +18,16 @@
     <meta name="apple-mobile-web-app-title" content="FarmBot" />
 
     <!-- Premium tipografi: Sora (başlık) + Inter (gövde) + JetBrains Mono (sayısal)
-         Font isteği kritik yolun dışında tutulur: `media="print"` tarayıcıya
-         "bu stil ekran için değil" dedirtir, dolayısıyla ilk boyamayı
-         engellemez; dosya inince onload ile `all`'a çevrilip devreye girer.
-         `display=swap` zaten yerel yazı tipiyle başlatıp sonra değiştiriyor,
-         bu yüzden metin ilk kareden itibaren okunur durumda. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="preload"
-      as="style"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-    />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-      media="print"
-      onload="this.media='all'"
-    />
-    <noscript>
-      <link
-        rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-      />
-    </noscript>
+         Dosyalar kendi sunucumuzdan geliyor; @font-face tanımları src/index.css'te.
+         Google Fonts kaldırıldı: iki ayrı origin için DNS+TLS el sıkışması
+         gerekiyordu ve Türkçe metin, Inter'in 83 KiB'lık latin-ext alt kümesini
+         zorunlu kılıyordu.
+         Aşağıdaki iki dosya giriş ekranında kesin kullanıldığı için önden
+         çekilir. Mono yalnızca panel içinde gerektiğinde iner, o yüzden
+         preload edilmiyor. Yazı tipi preload'u aynı origin'de bile
+         `crossorigin` ister; olmazsa dosya ikinci kez indirilir. -->
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/inter-tr.woff2" crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/sora-tr.woff2" crossorigin />
 
     <title>FarmBot · Yönetim Paneli</title>
 

@@ -23,6 +23,35 @@ import { useServerForm } from "@/hooks/useServerForm";
 import { useBot } from "@/store/useBot";
 import type { Curve, Device, Point } from "@/lib/types";
 
+/**
+ * Bakış köşeleri.
+ *
+ * `sx`/`sz`: kameranın yatak merkezine göre hangi tarafta durduğu. Bu ikili,
+ * ekrandaki sağ yönün dünya eksenleriyle nasıl hizalandığını belirliyor —
+ * yani sıfır noktasının solda mı sağda mı göründüğünü.
+ */
+export const CAMERA_ANGLES = {
+  "on-sol": { label: "Sıfır ön solda", sx: -1, sz: 1 },
+  "on-sag": { label: "Sıfır ön sağda", sx: 1, sz: 1 },
+  "arka-sol": { label: "Arkadan sol", sx: -1, sz: -1 },
+  "arka-sag": { label: "Arkadan sağ", sx: 1, sz: -1 },
+} as const;
+
+export type CameraAngle = keyof typeof CAMERA_ANGLES;
+
+function cameraPosition(
+  travel: { x: number; y: number; z: number },
+  viewer: ViewerConfig,
+): [number, number, number] {
+  const angle = CAMERA_ANGLES[(viewer.camera_angle as CameraAngle) ?? "on-sol"] ?? CAMERA_ANGLES["on-sol"];
+  const reach = Math.max(travel.x, travel.y) * 1.1 * viewer.zoom;
+  return [
+    travel.x / 2 + angle.sx * reach,
+    (LEG_HEIGHT + travel.z + 0.6) * viewer.zoom,
+    travel.y / 2 + angle.sz * (travel.y / 2 + reach),
+  ];
+}
+
 /** Milimetreden sahne birimine (metre). */
 const MM = 0.001;
 /** Konum sıçramalarını yumuşatan yaklaşma katsayısı. */
@@ -102,21 +131,15 @@ export default function Viewer3D() {
                 shadows
                 camera={{
                   /*
-                   * Kamera, **başlangıç noktası (X0/Y0) ön solda** kalacak
-                   * köşeden bakıyor.
+                   * Bakış köşesi kullanıcının tercihi.
                    *
-                   * Önceki açı +X/+Z köşesindendi ve sıfır noktası sağa
-                   * düşüyordu; panelde X sola doğru büyüyor gibi görünüyordu,
-                   * makinede ise sıfır solda. Bu köşeden bakınca ekrandaki
-                   * sağ yön dünya +X ile aynı hizaya geliyor.
-                   *
-                   * Mesafe en uzun kenardan türetiliyor; `zoom` onu ölçekliyor.
+                   * Hangi köşeden bakıldığı, makinenin sıfır noktasının ekranda
+                   * sağda mı solda mı göründüğünü belirliyor ve bu kişiden
+                   * kişiye değişen bir beklenti. Sabit bir açı seçip tahmin
+                   * etmek yerine dört köşeyi de sunuyoruz; varsayılan, sıfır
+                   * noktasının ön solda kaldığı açı.
                    */
-                  position: [
-                    travel.x / 2 - Math.max(travel.x, travel.y) * 1.1 * viewer.zoom,
-                    (LEG_HEIGHT + travel.z + 0.6) * viewer.zoom,
-                    travel.y + Math.max(travel.x, travel.y) * 1.1 * viewer.zoom,
-                  ],
+                  position: cameraPosition(travel, viewer),
                   fov: 45,
                 }}
                 dpr={[1, 2]}
@@ -205,6 +228,26 @@ function ViewerControls({
       </div>
 
       <div className="space-y-3">
+        {/* Bakış köşesi — sıfır noktasının ekranda nerede kalacağını belirler */}
+        <div>
+          <p className="mb-1.5 text-xs text-muted">Bakış açısı</p>
+          <div className="grid grid-cols-2 gap-1.5">
+            {(Object.keys(CAMERA_ANGLES) as CameraAngle[]).map((key) => (
+              <button
+                key={key}
+                onClick={() => onChange({ ...viewer, camera_angle: key })}
+                className={
+                  viewer.camera_angle === key
+                    ? "rounded-lg border border-transparent bg-gradient-brand px-2 py-1.5 text-[0.7rem] font-semibold text-white"
+                    : "rounded-lg border border-line bg-surface-2 px-2 py-1.5 text-[0.7rem] text-muted transition-soft hover:text-content"
+                }
+              >
+                {CAMERA_ANGLES[key].label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <Slider
           label="Robot boyutu"
           value={viewer.robot_scale}
@@ -718,16 +761,18 @@ function ControlEnclosure({
   y: number;
   z: number;
 }) {
-  const w = PROFILE * 7;
-  const h = PROFILE * 9;
-  const d = PROFILE * 3;
+  // Derinlik önce 60 mm idi; uzaktan bakınca çizgi gibi kalıp koyu zeminde
+  // seçilmiyordu. Pano yine küçük ama artık ayırt ediliyor.
+  const w = PROFILE * 8;
+  const h = PROFILE * 10;
+  const d = PROFILE * 5;
 
   return (
     <group position={[x, y, z]}>
       {/* Gövde */}
       <mesh castShadow receiveShadow>
         <boxGeometry args={[d, h, w]} />
-        <meshStandardMaterial color="#aeb5bd" metalness={0.4} roughness={0.5} />
+        <meshStandardMaterial color="#cdd3da" metalness={0.35} roughness={0.45} />
       </mesh>
       {/* Soğutma kanatları — fotoğraftaki dikey çizgiler */}
       {[-2, -1, 0, 1, 2].map((i) => (

@@ -1,5 +1,45 @@
 @import "tailwindcss";
 
+/* ========================================================================== *
+ *  YAZI TİPLERİ — kendi sunucumuzdan
+ *
+ *  Önceden Google Fonts'tan çekiliyordu. Sorun, Türkçe metnin `latin-ext`
+ *  alt kümesini zorunlu kılmasıydı: Inter'in latin-ext dosyası tek başına
+ *  83 KiB, latin'i ise 47 KiB — yani ağırlık başına 130 KiB. Giriş ekranı
+ *  tek ağırlıkla bile 167 KiB font indiriyordu.
+ *
+ *  Buradaki dosyalar `latin` aralığı + Türkçe'de eksik kalan beş karakterle
+ *  (Ğ ğ İ Ş ş — `ı` zaten latin'de var) alt kümelendi ve değişken font
+ *  olarak bırakıldı; tek dosya bütün ağırlıkları karşılıyor.
+ *
+ *  `size-adjust` kullanılmadı: `swap` sırasında yedek yazı tipiyle boy farkı
+ *  düzen kaymasına yol açabilir, ancak ölçülen CLS 0.001 seviyesinde.
+ * ========================================================================== */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 700; /* değişken eksen */
+  font-display: swap;
+  src: url("/fonts/inter-tr.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Sora";
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url("/fonts/sora-tr.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-tr.woff2") format("woff2");
+}
+
 /* Karanlık mod, sistem tercihine değil `.dark` sınıfına bağlı — kullanıcı elle seçebilsin. */
 @custom-variant dark (&:where(.dark, .dark *));
 
