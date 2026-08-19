@@ -76,7 +76,7 @@ export const TOOL_ZONE_DEFAULTS: ToolZoneConfig = {
 };
 
 export const VIEWER_DEFAULTS: ViewerConfig = {
-  camera_angle: "on-sol",
+  camera_angle: "on",
   robot_scale: 1,
   zoom: 1,
   font_scale: 1,

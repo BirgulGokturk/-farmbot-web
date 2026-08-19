@@ -31,24 +31,32 @@ import type { Curve, Device, Point } from "@/lib/types";
  * yani sıfır noktasının solda mı sağda mı göründüğünü.
  */
 export const CAMERA_ANGLES = {
-  "on-sol": { label: "Sıfır ön solda", sx: -1, sz: 1 },
-  "on-sag": { label: "Sıfır ön sağda", sx: 1, sz: 1 },
-  "arka-sol": { label: "Arkadan sol", sx: -1, sz: -1 },
-  "arka-sag": { label: "Arkadan sağ", sx: 1, sz: -1 },
+  on: { label: "Önden", sx: 0.35, sz: 1 },
+  sag: { label: "Sağdan", sx: 1, sz: 0.35 },
+  arka: { label: "Arkadan", sx: -0.35, sz: -1 },
+  sol: { label: "Soldan", sx: -1, sz: -0.35 },
 } as const;
 
 export type CameraAngle = keyof typeof CAMERA_ANGLES;
 
+/**
+ * Kameranın konumu — yatak merkezinden seçilen yöne doğru geri çekiliyor.
+ *
+ * Yön adları makinenin çevresindeki dört tarafı anlatıyor; önceki adlandırma
+ * ("sıfır ön solda" gibi) koordinat sistemini tarif ediyordu ve makinenin
+ * yanında durup bakan biri için anlaşılır değildi.
+ */
 function cameraPosition(
   travel: { x: number; y: number; z: number },
   viewer: ViewerConfig,
 ): [number, number, number] {
-  const angle = CAMERA_ANGLES[(viewer.camera_angle as CameraAngle) ?? "on-sol"] ?? CAMERA_ANGLES["on-sol"];
-  const reach = Math.max(travel.x, travel.y) * 1.1 * viewer.zoom;
+  const angle =
+    CAMERA_ANGLES[(viewer.camera_angle as CameraAngle)] ?? CAMERA_ANGLES.on;
+  const reach = Math.max(travel.x, travel.y) * 1.6 * viewer.zoom;
   return [
     travel.x / 2 + angle.sx * reach,
-    (LEG_HEIGHT + travel.z + 0.6) * viewer.zoom,
-    travel.y / 2 + angle.sz * (travel.y / 2 + reach),
+    (LEG_HEIGHT + travel.z * 0.6) * viewer.zoom,
+    travel.y / 2 + angle.sz * reach,
   ];
 }
 
