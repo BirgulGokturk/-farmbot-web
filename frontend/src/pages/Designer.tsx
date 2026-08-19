@@ -456,6 +456,7 @@ export default function Designer() {
               {heatmapOn && heatmapSensors.length > 1 && (
                 <Select
                   name="heatSensor"
+                  aria-label="Isı haritası için toprak nemi sensörü"
                   value={heatSensorId}
                   onChange={(event) => setHeatSensorId(event.target.value)}
                   className="h-8 w-40 text-xs"

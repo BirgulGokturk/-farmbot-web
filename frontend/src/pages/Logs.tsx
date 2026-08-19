@@ -134,6 +134,7 @@ export default function Logs() {
         />
         <Select
           name="level"
+          aria-label="Kayıt seviyesi filtresi"
           value={level}
           onChange={(e) => setLevel(e.target.value as LogLevel | "")}
           className="w-44"

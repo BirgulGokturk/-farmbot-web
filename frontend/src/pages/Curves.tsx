@@ -83,6 +83,7 @@ export default function Curves() {
           <div className="flex items-center gap-2">
             <Select
               name="type"
+              aria-label="Eklenecek eğri türü"
               value={newType}
               onChange={(e) => setNewType(e.target.value as CurveType)}
               className="h-8 w-36 text-xs"

@@ -65,7 +65,15 @@
   /* Metin */
   --text: #0d1712;
   --text-muted: #5c6f64;
-  --text-subtle: #8a9c91;
+  /*
+   * WCAG AA (4.5:1) için koyulaştırıldı. Eski #8a9c91 aydınlık temada
+   * yüzeylere göre yalnızca 2,37-2,90:1 veriyordu — eşiğin çok altında.
+   * Yeni değer en zor durumda (surface-3) 4,52:1.
+   *
+   * Lighthouse bunu hiç yakalamadı: uygulama karanlık temada açıldığı için
+   * denetim aydınlık temayı görmüyor. Karanlık temadaki karşılığı 111. satırda.
+   */
+  --text-subtle: #5a6d63;
 
   /* Marka ve durum renkleri */
   --brand: #059669;
@@ -108,7 +116,13 @@
 
   --text: #e6f0ec;
   --text-muted: #93a9a2;
-  --text-subtle: #6b8079;
+  /*
+   * WCAG AA için açıldı. Eski #6b8079 yalnızca en koyu zeminde (bg) geçiyor,
+   * kartların üzerinde kalıyordu: surface 4,20 · surface-2 3,87 · surface-3
+   * 3,43:1. Lighthouse sensör sayfasında bunu üç ayrı öğede raporladı.
+   * Yeni değer en zor durumda 4,68:1.
+   */
+  --text-subtle: #849790;
 
   --brand: #34d399;
   --brand-soft: #06301f;

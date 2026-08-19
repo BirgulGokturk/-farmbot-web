@@ -64,7 +64,12 @@ export function CardHeader({
           </span>
         )}
         <div className="min-w-0">
-          <h3 className="truncate text-base font-semibold text-content">{title}</h3>
+          {/*
+            h2, h3 değil: kartlar sayfa başlığının (PageHeader'daki h1) hemen
+            altında duruyor. h3 kullanmak h2'yi atlıyordu ve ekran okuyucuların
+            başlıklar arasında gezinmesini bozuyordu.
+          */}
+          <h2 className="truncate text-base font-semibold text-content">{title}</h2>
           {subtitle && <p className="mt-0.5 text-sm text-muted">{subtitle}</p>}
         </div>
       </div>
@@ -266,21 +271,40 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
   ref,
 ) {
   const selectId = id ?? props.name;
+
+  const field = (
+    <select
+      ref={ref}
+      id={selectId}
+      className={cn(
+        "h-11 w-full appearance-none rounded-xl border border-line bg-surface-2 px-3.5",
+        "text-sm text-content transition-soft focus:border-brand focus:outline-none",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </select>
+  );
+
+  /*
+   * Görünür etiket yokken <label> ile sarmıyoruz.
+   *
+   * Eskiden her durumda sarılıyordu; `label` verilmediğinde geriye içi boş bir
+   * <label> kalıyordu. Boş etiket erişilebilir ad üretmiyor, ekran okuyucu
+   * alanı yalnızca "açılır liste" diye okuyor. Lighthouse bunu sensör
+   * sayfasında raporladı.
+   *
+   * Etiketsiz kullanımda adı çağıran taraf `aria-label` ile vermeli.
+   */
+  if (!label) {
+    return <div className="block">{field}</div>;
+  }
+
   return (
     <label className="block" htmlFor={selectId}>
-      {label && <span className="mb-1.5 block text-sm font-medium text-content">{label}</span>}
-      <select
-        ref={ref}
-        id={selectId}
-        className={cn(
-          "h-11 w-full appearance-none rounded-xl border border-line bg-surface-2 px-3.5",
-          "text-sm text-content transition-soft focus:border-brand focus:outline-none",
-          className,
-        )}
-        {...props}
-      >
-        {children}
-      </select>
+      <span className="mb-1.5 block text-sm font-medium text-content">{label}</span>
+      {field}
     </label>
   );
 });
@@ -421,7 +445,8 @@ export function EmptyState({
         </span>
       )}
       <div>
-        <h4 className="text-base font-semibold text-content">{title}</h4>
+        {/* Boş durum kartın içinde duruyor; kart başlığı h2 olduğuna göre burası h3. */}
+        <h3 className="text-base font-semibold text-content">{title}</h3>
         {description && <p className="mt-1 max-w-sm text-sm text-muted">{description}</p>}
       </div>
       {action}

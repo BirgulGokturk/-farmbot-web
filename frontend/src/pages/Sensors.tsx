@@ -81,6 +81,12 @@ export default function Sensors() {
             </Button>
             <Select
               name="range"
+              /*
+               * Görünür etiket yok — araç çubuğunda "Geçmişi Temizle" düğmesinin
+               * yanında duruyor ve üstüne yazı koymak hizayı bozardı. Ekran
+               * okuyucunun ne seçtiğimizi söyleyebilmesi için ad buradan geliyor.
+               */
+              aria-label="Grafik zaman aralığı"
               value={hours}
               onChange={(e) => setHours(Number(e.target.value))}
               className="w-36"
