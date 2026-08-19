@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, ImageOff, RefreshCw, Video, VideoOff } from "lucide-react";
 
@@ -14,6 +14,7 @@ import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
+import type { CapturedImage } from "@/lib/types";
 
 export default function CameraPage() {
   const deviceId = useDeviceId();
@@ -141,11 +142,10 @@ export default function CameraPage() {
                 key={image.id}
                 className="group overflow-hidden rounded-xl border border-line bg-surface-2"
               >
-                <img
-                  src={image.thumbnail_url ?? image.url}
+                <GalleryImage
+                  deviceId={deviceId!}
+                  image={image}
                   alt={`Çekim: ${formatDateTime(image.captured_at)}`}
-                  loading="lazy"
-                  className="aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-105"
                 />
                 <figcaption className="px-2.5 py-2 text-[0.7rem] leading-tight text-subtle">
                   <span className="block text-content">{formatDateTime(image.captured_at)}</span>
@@ -167,5 +167,77 @@ export default function CameraPage() {
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * Galeri karesi.
+ *
+ * Kare veritabanında saklandığı ve uç nokta oturum istediği için doğrudan
+ * `<img src>` ile gösterilemiyor — tarayıcı `<img>` isteğine `Authorization`
+ * başlığı eklemez. Kareyi kimlikli olarak indirip `blob:` adresi üretiyoruz.
+ *
+ * Üretilen adres bileşen kalktığında serbest bırakılıyor: 48 karelik bir
+ * galeride bunu atlamak sayfa açık kaldıkça biriken bir bellek sızıntısı olurdu.
+ */
+function GalleryImage({
+  deviceId,
+  image,
+  alt,
+}: {
+  deviceId: string;
+  image: CapturedImage;
+  alt: string;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  // Dış bir adres verilmişse (eski kayıtlar) doğrudan kullanılabilir
+  const external = /^https?:\/\//i.test(image.url) ? image.url : null;
+
+  useEffect(() => {
+    if (external) return;
+
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    api.images
+      .file(deviceId, image.id)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [deviceId, image.id, external]);
+
+  const finalSrc = external ?? src;
+
+  if (failed) {
+    return (
+      <div className="grid aspect-square w-full place-items-center bg-surface text-xs text-subtle">
+        Görüntü alınamadı
+      </div>
+    );
+  }
+
+  if (!finalSrc) {
+    return <div className="aspect-square w-full animate-pulse bg-surface" />;
+  }
+
+  return (
+    <img
+      src={finalSrc}
+      alt={alt}
+      loading="lazy"
+      className="aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-105"
+    />
   );
 }

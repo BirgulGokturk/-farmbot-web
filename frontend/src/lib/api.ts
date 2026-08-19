@@ -182,6 +182,37 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return data as T;
 }
 
+/**
+ * İkili içerik indirir (fotoğraf karesi).
+ *
+ * `request` yanıtı metin okuyup JSON'a çevirdiği için ikili veriyi bozardı.
+ * Ayrı bir yol gerekiyor ama kimlik doğrulama ve token yenileme aynı kalmalı:
+ * fotoğraf uç noktası da oturum ister.
+ *
+ * Neden `<img src>` yetmiyor: tarayıcı `<img>` isteğine `Authorization`
+ * başlığı eklemiyor. Uç noktayı herkese açmak yerine kareyi burada indirip
+ * `blob:` adresi üretiyoruz.
+ */
+async function requestBlob(path: string, retried = false): Promise<Blob> {
+  const headers = new Headers();
+  if (tokenStore.access) headers.set("Authorization", `Bearer ${tokenStore.access}`);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { headers });
+  } catch {
+    throw new ApiError(0, "Sunucuya ulaşılamıyor. Bağlantınızı kontrol edin.");
+  }
+
+  if (res.status === 401 && !retried && (await refreshTokens())) {
+    return requestBlob(path, true);
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, `Görüntü alınamadı (${res.status})`);
+  }
+  return res.blob();
+}
+
 function safeParse(text: string): unknown {
   try {
     return JSON.parse(text);
@@ -452,6 +483,9 @@ export const api = {
   images: {
     list: (deviceId: string, limit = 48) =>
       request<Page<CapturedImage>>(`/devices/${deviceId}/images`, { query: { limit } }),
+    /** Karenin kendisi. Kimlik doğrulaması gerektiği için blob olarak iniyor. */
+    file: (deviceId: string, imageId: string) =>
+      requestBlob(`/devices/${deviceId}/images/${imageId}/file`),
   },
 
   /** Robotu doğrudan süren komutlar. */
