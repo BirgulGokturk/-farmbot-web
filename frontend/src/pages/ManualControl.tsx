@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Camera, Crosshair, Gamepad2, Move3d, Ruler, Zap } from "lucide-react";
 
@@ -17,7 +17,7 @@ import { EmergencyStop } from "@/components/control/EmergencyStop";
 import { JogPad } from "@/components/control/JogPad";
 import { api } from "@/lib/api";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
-import { useBot } from "@/store/useBot";
+import { useBot, useBotPosition } from "@/store/useBot";
 import type { Peripheral } from "@/lib/types";
 
 export default function ManualControl() {
@@ -201,8 +201,30 @@ function Row({ label, value }: { label: string; value: string }) {
 function GoToCoordinate() {
   const deviceId = useDeviceId();
   const { data: device } = useActiveDevice();
+  const position = useBotPosition();
   const [coords, setCoords] = useState({ x: "0", y: "0", z: "0" });
   const [busy, setBusy] = useState(false);
+  // Kullanıcı bir alana dokunduysa artık konumla ezmiyoruz
+  const [touched, setTouched] = useState(false);
+
+  /*
+   * Form robotun **bulunduğu** konumla başlıyor.
+   *
+   * Çözdüğü hata: kutular 0 ile başlıyordu ve yalnızca Z'yi değiştiren biri
+   * farkında olmadan "X 0, Y 0" da göndermiş oluyordu. Robot bahçenin
+   * köşesine doğru yola çıkıyor, güvenli geçiş koruması da araya girip ucu
+   * kaldırıyordu — dışarıdan bakınca "bir yere kadar gelip durdu ve yukarı
+   * çıktı" gibi görünüyor. Şimdi bir alana dokunmadıkça diğer ikisi olduğu
+   * yerde kalıyor.
+   */
+  useEffect(() => {
+    if (touched) return;
+    setCoords({
+      x: String(Math.round(position.x)),
+      y: String(Math.round(position.y)),
+      z: String(Math.round(position.z)),
+    });
+  }, [touched, position.x, position.y, position.z]);
 
   async function go() {
     if (!deviceId) return;
@@ -239,7 +261,10 @@ function GoToCoordinate() {
           label="X"
           inputMode="numeric"
           value={coords.x}
-          onChange={(e) => setCoords({ ...coords, x: e.target.value })}
+          onChange={(e) => {
+            setTouched(true);
+            setCoords({ ...coords, x: e.target.value });
+          }}
           hint={device ? `0 – ${device.bed_width_mm}` : undefined}
         />
         <Input
@@ -247,7 +272,10 @@ function GoToCoordinate() {
           label="Y"
           inputMode="numeric"
           value={coords.y}
-          onChange={(e) => setCoords({ ...coords, y: e.target.value })}
+          onChange={(e) => {
+            setTouched(true);
+            setCoords({ ...coords, y: e.target.value });
+          }}
           hint={device ? `0 – ${device.bed_length_mm}` : undefined}
         />
         <Input
@@ -255,12 +283,23 @@ function GoToCoordinate() {
           label="Z"
           inputMode="numeric"
           value={coords.z}
-          onChange={(e) => setCoords({ ...coords, z: e.target.value })}
+          onChange={(e) => {
+            setTouched(true);
+            setCoords({ ...coords, z: e.target.value });
+          }}
           hint={device ? `-${device.max_z_mm} – 0` : undefined}
         />
       </div>
       <Button variant="primary" className="mt-4" fullWidth loading={busy} onClick={go}>
         Bu Konuma Git
+      </Button>
+      <Button
+        size="sm"
+        fullWidth
+        className="mt-2"
+        onClick={() => setTouched(false)}
+      >
+        Robotun konumuna sıfırla
       </Button>
     </Card>
   );

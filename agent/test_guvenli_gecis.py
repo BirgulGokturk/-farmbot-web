@@ -86,6 +86,34 @@ def test_x_eve_donerken_uc_once_kaldirilir():
     assert komutlar[1] == {"cmd": "gohome", "axis": 0}, komutlar
 
 
+def test_xy_eve_donerken_uc_once_kaldirilir_z_eve_gitmez():
+    """Jog pad'in ortasındaki ev düğmesi Z'yi eve göndermemeli.
+
+    Kullanıcı yatay tuşların ortasındaki düğmeye basarken Z'nin oynamasını
+    beklemiyor; takılı bir uç varken hiç istemiyor.
+    """
+    g = SahteGantry((100.0, 100.0, -50.0))
+    g.safe_z = 0.0
+    komutlar = []
+    g.command = lambda p: komutlar.append(p) or asyncio.sleep(0)
+    asyncio.run(g.go_home("xy"))
+
+    assert komutlar[0]["target"] == [100.0, 100.0, 0.0], komutlar
+    # Yalnızca X (0) ve Y (1); Z (2) yok
+    eksenler = [k["axis"] for k in komutlar if k.get("cmd") == "gohome"]
+    assert eksenler == [0, 1], eksenler
+
+
+def test_tum_eksen_eve_donuste_once_z_gider():
+    g = SahteGantry((100.0, 100.0, -50.0))
+    komutlar = []
+    g.command = lambda p: komutlar.append(p) or asyncio.sleep(0)
+    asyncio.run(g.go_home("all"))
+    eksenler = [k["axis"] for k in komutlar if k.get("cmd") == "gohome"]
+    # Z önce: yoksa alet toprakta sürünerek yatay harekete başlar
+    assert eksenler == [2, 0, 1], eksenler
+
+
 if __name__ == "__main__":
     gecen = 0
     for ad, fn in sorted(globals().items()):

@@ -44,12 +44,14 @@ export function JogPad({ deviceId, speed }: JogPadProps) {
     }
   }
 
-  async function goHome(axis: "all" | "z") {
+  async function goHome(axis: "xy" | "z") {
     if (!deviceId) return;
     setPending(`home-${axis}`);
     try {
       await api.control.home(deviceId, { axis, speed });
-      toast.info(axis === "all" ? "Robot eve dönüyor" : "Z ekseni yukarı çekiliyor");
+      toast.info(
+        axis === "xy" ? "X ve Y eve dönüyor" : "Z ekseni yukarı çekiliyor",
+      );
     } catch (error) {
       toast.error("Komut gönderilemedi", (error as Error).message);
     } finally {
@@ -105,11 +107,15 @@ export function JogPad({ deviceId, speed }: JogPadProps) {
             <ArrowLeft className="size-6" />
           </JogButton>
 
+          {/* Yalnızca X ve Y.
+              Eskiden "all" gönderiyordu ve Z de eve gidiyordu; oysa bu düğme
+              yatay jog tuşlarının ortasında duruyor ve kullanıcı Z'nin
+              oynamasını beklemiyor — takılı bir uç varken hiç istemiyor. */}
           <JogButton
-            label="Eve dön"
+            label="X ve Y'yi eve gönder"
             disabled={disabled}
-            loading={pending === "home-all"}
-            onClick={() => goHome("all")}
+            loading={pending === "home-xy"}
+            onClick={() => goHome("xy")}
             variant="home"
           >
             <Home className="size-5" />

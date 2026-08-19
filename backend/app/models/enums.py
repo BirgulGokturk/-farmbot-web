@@ -106,6 +106,10 @@ class Axis(str, Enum):
     X = "x"
     Y = "y"
     Z = "z"
+    # Yalnızca yatay eksenler. Jog pad'in ortasındaki ev düğmesi bunu
+    # kullanıyor: kullanıcı X/Y'yi eve göndermek isterken Z'nin de hareket
+    # etmesini beklemiyor, hele takılı bir uç varken.
+    XY = "xy"
     ALL = "all"
 
 

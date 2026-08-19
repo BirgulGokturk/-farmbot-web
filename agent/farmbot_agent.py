@@ -765,7 +765,7 @@ class Agent:
 
         elif kind in {"home", "find_home"}:
             axis = str(args.get("axis", "all")).lower()
-            if axis not in {"x", "y", "z", "all"}:
+            if axis not in {"x", "y", "z", "xy", "all"}:
                 axis = "all"
             logger.info("Eve dönülüyor: %s", axis)
             await self.gantry.go_home(axis)

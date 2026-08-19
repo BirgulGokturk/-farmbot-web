@@ -433,10 +433,19 @@ def _agent_config(device: Device, machine: dict) -> dict:
         # kaynağı; sulama da onu kullanıyor). Koruma kapalıysa hiç
         # gönderilmiyor: ajan tarafında "kapalı" tek bir durumla (None) temsil
         # edilsin, iki ayrı bayrak karşılaştırmak gerekmesin.
+        #
+        # Yükseklik 0 ise **ayarlanmamış** sayıyoruz. Sebebi sahada görüldü:
+        # alanın varsayılanı 0 ve bu makinede Z'nin sıfırı güvenli yükseklik
+        # değil. Koruma açık kalınca her yatay harekette uç 0'a sürülüyor,
+        # kullanıcı da "bir yere kadar gelip duruyor ve yukarı çıkıyor" diyor.
+        # Doğrulanmamış bir sayıyla makineyi sürmektense korumayı kapalı
+        # tutmak daha az zararlı; panel de bunu açıkça söylüyor.
         "travel": {
             "enabled": machine["travel"]["enabled"],
             "safe_z_mm": (
-                float(device.safe_height_mm) if machine["travel"]["enabled"] else None
+                float(device.safe_height_mm)
+                if machine["travel"]["enabled"] and device.safe_height_mm
+                else None
             ),
         },
     }

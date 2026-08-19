@@ -530,10 +530,16 @@ class GantryClient:
         gönder" demesi, yoldaki bitkileri feda etmeyi göze aldığı anlamına
         gelmiyor.
         """
-        if axis in {"x", "y"}:
+        if axis in {"x", "y", "xy"}:
             await self.retract_to_safe()
 
-        order = [2, 0, 1] if axis == "all" else [AXIS_INDEX[axis]]
+        if axis == "all":
+            order = [2, 0, 1]
+        elif axis == "xy":
+            order = [0, 1]
+        else:
+            order = [AXIS_INDEX[axis]]
+
         for index in order:
             await self.command({"cmd": "gohome", "axis": index})
 
