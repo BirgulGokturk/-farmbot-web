@@ -426,6 +426,190 @@ function Bench({
   );
 }
 
+/**
+ * Toprak kabı — çerçevenin içine oturan plastik saklama kabı.
+ *
+ * Sahada tezgâhın içine saklama kapları konup toprakla dolduruluyor; makine
+ * bitkileri bu kapların üstünden ekiyor. Daha önce çerçevenin içi boştu ve
+ * bitkiler havada duruyor gibi görünüyordu.
+ *
+ * Kap kenarları yarı saydam: fotoğraftaki kaplar şeffaf plastik ve toprağın
+ * yan duvardan görünmesi derinlik hissini veriyor.
+ */
+function SoilBin({
+  width,
+  length,
+  top,
+  depth,
+}: {
+  width: number;
+  length: number;
+  /** Kabın ağız hizası (m) */
+  top: number;
+  /** Kabın derinliği (m) */
+  depth: number;
+}) {
+  const wall = 0.005;
+  // Kap, çerçevenin içine biraz boşluk bırakarak oturuyor
+  const inset = PROFILE * 1.2;
+  const w = width - inset * 2;
+  const l = length - inset * 2;
+  const cx = width / 2;
+  const cz = length / 2;
+  const midY = top - depth / 2;
+
+  // Toprak yüzeyi kabın ağzından biraz aşağıda
+  const soilY = top - depth * 0.22;
+
+  /** Toprağı düz bir levha gibi göstermemek için serpiştirilmiş küçük kümeler. */
+  const clumps = useMemo(() => {
+    const list: { x: number; z: number; r: number }[] = [];
+    // Sabit bir örüntü: her karede yeniden üretilirse toprak titrer
+    let seed = 7;
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    for (let i = 0; i < 26; i++) {
+      list.push({
+        x: (rand() - 0.5) * w * 0.92,
+        z: (rand() - 0.5) * l * 0.92,
+        r: 0.004 + rand() * 0.006,
+      });
+    }
+    return list;
+  }, [w, l]);
+
+  return (
+    <group position={[cx, 0, cz]}>
+      {/* Kap tabanı */}
+      <mesh position={[0, top - depth, 0]} receiveShadow>
+        <boxGeometry args={[w, wall, l]} />
+        <meshStandardMaterial color="#6b7280" roughness={0.7} />
+      </mesh>
+
+      {/* Dört yan duvar — yarı saydam plastik */}
+      {[
+        { p: [0, midY, -l / 2] as const, s: [w, depth, wall] as const },
+        { p: [0, midY, l / 2] as const, s: [w, depth, wall] as const },
+        { p: [-w / 2, midY, 0] as const, s: [wall, depth, l] as const },
+        { p: [w / 2, midY, 0] as const, s: [wall, depth, l] as const },
+      ].map((wallSpec, index) => (
+        <mesh key={index} position={wallSpec.p} castShadow>
+          <boxGeometry args={wallSpec.s} />
+          <meshStandardMaterial
+            color="#9ca3af"
+            transparent
+            opacity={0.35}
+            roughness={0.25}
+            metalness={0.05}
+          />
+        </mesh>
+      ))}
+
+      {/* Toprak dolgusu */}
+      <mesh position={[0, (soilY + (top - depth)) / 2, 0]} receiveShadow>
+        <boxGeometry args={[w - wall * 2, soilY - (top - depth), l - wall * 2]} />
+        <meshStandardMaterial color="#4a3220" roughness={1} />
+      </mesh>
+
+      {/* Yüzey kümeleri — toprağın düz levha gibi durmasını engelliyor */}
+      {clumps.map((c, index) => (
+        <mesh key={index} position={[c.x, soilY, c.z]} receiveShadow castShadow>
+          <sphereGeometry args={[c.r, 6, 4]} />
+          <meshStandardMaterial color="#5a3d27" roughness={1} flatShading />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/**
+ * Kablo taşıma zinciri.
+ *
+ * Eksen boyunca uzanan, birbirine geçmiş baklalardan oluşuyor. Makinenin
+ * "canlı" görünmesini sağlayan en belirgin ayrıntı: fotoğrafta motor
+ * kablolarını taşıyan siyah zincir bu.
+ */
+function DragChain({
+  from,
+  to,
+  y,
+  z,
+}: {
+  from: number;
+  to: number;
+  y: number;
+  z: number;
+}) {
+  const link = PROFILE * 0.9;
+  const count = Math.max(4, Math.min(40, Math.floor(Math.abs(to - from) / link)));
+
+  return (
+    <group>
+      {Array.from({ length: count }, (_, i) => {
+        const t = i / Math.max(1, count - 1);
+        return (
+          <mesh key={i} position={[from + (to - from) * t, y, z]} castShadow>
+            <boxGeometry args={[link * 0.8, link * 0.55, link * 0.7]} />
+            <meshStandardMaterial color="#1f2329" roughness={0.75} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+/** Elektronik kutusu ve ondan çıkan kablo demeti. */
+function ControlBox({ x, y, z }: { x: number; y: number; z: number }) {
+  return (
+    <group position={[x, y, z]}>
+      <mesh castShadow>
+        <boxGeometry args={[PROFILE * 5, PROFILE * 7, PROFILE * 2.4]} />
+        <meshStandardMaterial color="#d5d9de" metalness={0.35} roughness={0.45} />
+      </mesh>
+      {/* Kapak çizgisi */}
+      <mesh position={[0, 0, PROFILE * 1.25]}>
+        <boxGeometry args={[PROFILE * 4.4, PROFILE * 6.2, PROFILE * 0.1]} />
+        <meshStandardMaterial color="#aeb4bd" metalness={0.4} roughness={0.4} />
+      </mesh>
+      {/* Durum ledi */}
+      <mesh position={[PROFILE * 1.6, PROFILE * 2.6, PROFILE * 1.35]}>
+        <cylinderGeometry args={[PROFILE * 0.2, PROFILE * 0.2, PROFILE * 0.15, 10]} />
+        <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={0.8} />
+      </mesh>
+      {/* Alttan çıkan kablo demeti */}
+      <mesh position={[0, -PROFILE * 4.5, 0]} castShadow>
+        <cylinderGeometry args={[PROFILE * 0.35, PROFILE * 0.35, PROFILE * 3, 8]} />
+        <meshStandardMaterial color="#15181d" roughness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
+/** Uç yuvası — bekleyen aletlerin durduğu küçük askı. */
+function ToolRack({ x, y, z }: { x: number; y: number; z: number }) {
+  const tools = ["#3b82f6", "#f59e0b", "#22c55e"];
+  return (
+    <group position={[x, y, z]}>
+      {/* Askı çubuğu */}
+      <Extrusion size={[PROFILE * 6, PROFILE * 0.6, PROFILE * 0.6]} position={[0, 0, 0]} slot={false} />
+      {tools.map((color, index) => (
+        <group key={index} position={[(index - 1) * PROFILE * 2, -PROFILE * 1.6, 0]}>
+          <mesh castShadow>
+            <cylinderGeometry args={[PROFILE * 0.6, PROFILE * 0.6, PROFILE * 2.4, 12]} />
+            <meshStandardMaterial color={color} roughness={0.5} metalness={0.2} />
+          </mesh>
+          <mesh position={[0, -PROFILE * 1.5, 0]} castShadow>
+            <coneGeometry args={[PROFILE * 0.4, PROFILE * 1, 10]} />
+            <meshStandardMaterial color="#6b7280" metalness={0.7} roughness={0.35} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+}
+
 function Scene({
   points,
   position,
@@ -442,6 +626,11 @@ function Scene({
   const benchHeight = LEG_HEIGHT * viewer.robot_scale;
   // Portal yüksekliği Z ekseninin gerçek stroğu kadar
   const portal = Math.max(0.25, travel.z) * viewer.robot_scale;
+
+  // Toprak kabı çerçevenin içine oturuyor; bitkiler tezgâh düzleminde değil,
+  // toprağın yüzeyinde bitiyor.
+  const binDepth = Math.min(0.18, Math.max(0.08, Math.min(width, length) * 0.35));
+  const soilY = benchHeight - binDepth * 0.22;
 
   const plants = useMemo(
     () => points.filter((p) => p.point_type === "plant" && p.species),
@@ -491,6 +680,32 @@ function Scene({
 
       <Bench width={width} length={length} height={benchHeight} />
 
+      {/* Toprak dolu saklama kabı — çerçevenin içi artık boş değil */}
+      <SoilBin width={width} length={length} top={benchHeight} depth={binDepth} />
+
+      {/* Kablo taşıma zinciri, X rayı boyunca */}
+      <DragChain
+        from={0}
+        to={width}
+        y={benchHeight + PROFILE * 2.6}
+        z={-PROFILE}
+      />
+
+      {/* Elektronik kutusu bir ayağın üzerinde */}
+      <ControlBox
+        x={-PROFILE * 2.5}
+        y={benchHeight * 0.62}
+        z={length * 0.22}
+      />
+
+      {/* Bekleyen uçların askısı — kabın uzak ucunda, toprağın üstünde durur.
+          Çerçevenin dışına koymak havada asılı gibi görünüyordu. */}
+      <ToolRack
+        x={width * 0.5}
+        y={soilY + PROFILE * 2.6}
+        z={length - PROFILE * 3}
+      />
+
       <RobotRig
         width={width}
         length={length}
@@ -505,7 +720,7 @@ function Scene({
           key={plant.id}
           x={plant.x * MM}
           z={plant.y * MM}
-          base={benchHeight}
+          base={soilY}
           radius={Math.max(0.02, plant.radius_mm * MM)}
           species={plant.species!}
           progress={growthAt(plant, now, curveMap).maturity}
@@ -515,7 +730,7 @@ function Scene({
       ))}
 
       <OrbitControls
-        target={[width / 2, benchHeight * 0.95, length / 2]}
+        target={[width / 2, soilY, length / 2]}
         enableDamping
         maxPolarAngle={Math.PI / 2.05}
         minDistance={0.6}
