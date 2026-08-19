@@ -13,7 +13,9 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DbSession, OwnedDevice, ensure_unlocked
+from app.db.base import utcnow
 from app.models import Device, Point, Sensor, Tool
+from app.models.enums import PlantStage, PointType
 from app.schemas.control import (
     CommandResponse,
     ExecuteSequenceRequest,
@@ -24,10 +26,11 @@ from app.schemas.control import (
     PinWriteRequest,
     RawCommandRequest,
     ServoRequest,
+    SowRequest,
     SurveyRequest,
     WaterPointRequest,
 )
-from app.services import commands, gateway
+from app.services import commands, gateway, machine_config
 from app.services.mqtt import RpcError, RpcTimeoutError
 
 router = APIRouter(prefix="/devices/{device_id}/control", tags=["Kontrol"])
@@ -198,6 +201,104 @@ async def _duration_from_volume(db: DbSession, device_id: uuid.UUID, volume_ml: 
             detail="Debisi tanımlı bir sulama ucu yok. duration_ms gönderin veya alete debi ekleyin.",
         )
     return int(volume_ml / tool.flow_rate_ml_per_s * 1000)
+
+
+# --------------------------------------------------------------------------- #
+# Tohum ekimi — vakumlu uç
+# --------------------------------------------------------------------------- #
+
+@router.post("/sow", response_model=CommandResponse)
+async def sow_points(
+    payload: SowRequest, device: OwnedDevice, db: DbSession
+) -> CommandResponse:
+    """Seçilen bitkileri vakumlu uçla eker.
+
+    Her bitki için sıra: tepsiden tohumu al → hedefe git → çukura bırak.
+    Tümü **tek** RPC gövdesi hâlinde gidiyor; robot adımları sırayla uyguluyor
+    ve araya başka komut giremiyor. Yarıda kesilen bir ekim, ucunda tohum asılı
+    duran bir robot bırakırdı.
+
+    Uç yukarı kaldırma korumasını burada üretmiyoruz: o, ajanda her hareketin
+    önünde zaten uygulanıyor (bkz. agent/gantry.py `move_xyz`).
+    """
+    ensure_unlocked(device)
+
+    seeder = machine_config.normalize(device.settings)["seeder"]
+    if not seeder["enabled"]:
+        raise HTTPException(
+            422,
+            detail=(
+                "Vakumlu tohum ucu tanımlı değil. "
+                "Ayarlar → Tohum Ekimi'nden tepsi konumunu ve vakum pinini girin."
+            ),
+        )
+
+    stmt = select(Point).where(
+        Point.device_id == device.id,
+        Point.point_type == PointType.PLANT,
+        Point.discarded_at.is_(None),
+    )
+    if payload.point_ids:
+        stmt = stmt.where(Point.id.in_(payload.point_ids))
+    else:
+        # Boş istek = "tasarımdaki henüz ekilmemişleri ek"
+        stmt = stmt.where(Point.stage == PlantStage.PLANNED)
+
+    points = list((await db.execute(stmt.order_by(Point.x, Point.y))).scalars().all())
+    if not points:
+        raise HTTPException(404, detail="Ekilecek bitki bulunamadı")
+
+    x_min, x_max, y_min, y_max = machine_config.planting_bounds(device)
+    disarida = [
+        p.name for p in points if not (x_min <= p.x <= x_max and y_min <= p.y <= y_max)
+    ]
+    if disarida:
+        raise HTTPException(
+            422,
+            detail=(
+                f"{len(disarida)} bitki ekim alanının dışında "
+                f"(X {x_min:.0f}–{x_max:.0f}, Y {y_min:.0f}–{y_max:.0f} mm): "
+                + ", ".join(disarida[:5])
+            ),
+        )
+
+    tray = (seeder["tray_x_mm"], seeder["tray_y_mm"], seeder["tray_z_mm"])
+    body: list[dict] = []
+    for point in points:
+        # Derinlik önceliği: bitkiye özel > türün katalog değeri > ayarlardaki
+        depth = point.depth_mm
+        if depth is None and point.species is not None:
+            depth = point.species.sow_depth_mm
+        if depth is None:
+            depth = seeder["default_depth_mm"]
+
+        body.extend(
+            commands.sow_at(
+                x=point.x,
+                y=point.y,
+                soil_z=device.soil_height_mm,
+                depth_mm=float(depth),
+                tray=tray,
+                vacuum_pin=seeder["vacuum_pin"],
+                pick_dwell_ms=seeder["pick_dwell_ms"],
+                release_dwell_ms=seeder["release_dwell_ms"],
+                speed=payload.speed,
+            )
+        )
+
+    if payload.mark_planted:
+        # Komut gönderilmeden **önce** işaretliyoruz: gönderim uzun sürüyor ve
+        # yanıt beklenmiyor. Sonra işaretleseydik kullanıcı ekim bitene kadar
+        # aynı bitkileri ikinci kez sıraya sokabilirdi.
+        planted_at = utcnow()
+        for point in points:
+            point.stage = PlantStage.PLANTED
+            point.planted_at = planted_at
+        await db.commit()
+
+    response = await _dispatch(device, body, wait=False)
+    response.detail = f"{len(points)} tohum ekim sırasına alındı"
+    return response
 
 
 # --------------------------------------------------------------------------- #

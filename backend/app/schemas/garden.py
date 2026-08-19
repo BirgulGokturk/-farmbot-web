@@ -177,3 +177,25 @@ class ToolRead(ORMModel):
     flow_rate_ml_per_s: float | None
     status: ToolStatus
     created_at: datetime
+
+
+class PointScatter(BaseModel):
+    """Ekim alanına rastgele bitki serpiştirme isteği."""
+
+    species_id: uuid.UUID
+    count: int = Field(default=10, ge=1, le=500)
+    # Yayılma çapı: boş bırakılırsa türün katalogdaki değeri kullanılıyor
+    spread_mm: float | None = Field(default=None, gt=0, le=5000)
+    # Mevcut bitkilerden de bu kadar uzak durulsun mu
+    avoid_existing: bool = True
+    # Aynı isteği tekrarlayınca aynı deseni üretmek için (test ve önizleme)
+    seed: int | None = None
+
+
+class PointScatterResult(BaseModel):
+    created: list[PointRead]
+    requested: int
+    placed: int
+    # Alan dolduğu için yerleştirilemeyen sayısı — sessizce eksik bırakmamak için
+    skipped: int
+    detail: str

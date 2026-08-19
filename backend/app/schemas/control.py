@@ -55,6 +55,19 @@ class WaterPointRequest(BaseModel):
     speed: int = Field(default=100, ge=1, le=100)
 
 
+class SowRequest(BaseModel):
+    """Vakumlu uçla tohum ek.
+
+    `point_ids` boş bırakılırsa henüz ekilmemiş (planlanan) tüm bitkiler
+    sıraya alınır — "tasarımı olduğu gibi ek" hâli.
+    """
+
+    point_ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)
+    speed: int = Field(default=100, ge=1, le=100)
+    # Ekim sonrası bitkiler "ekildi" olarak işaretlensin mi
+    mark_planted: bool = True
+
+
 class ServoRequest(BaseModel):
     pin: int = Field(ge=0, le=69)
     angle: int = Field(ge=0, le=180)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -12,7 +13,15 @@ from app.db.base import utcnow
 from app.models import PlantSpecies, Point
 from app.models.enums import PointType
 from app.schemas.common import Message
-from app.schemas.garden import PointBulkMove, PointCreate, PointRead, PointUpdate
+from app.schemas.garden import (
+    PointBulkMove,
+    PointCreate,
+    PointRead,
+    PointScatter,
+    PointScatterResult,
+    PointUpdate,
+)
+from app.services import machine_config
 
 router = APIRouter(prefix="/devices/{device_id}/points", tags=["Bahçe"])
 
@@ -95,6 +104,104 @@ async def bulk_move(payload: PointBulkMove, device: OwnedDevice, db: DbSession) 
 
     await db.commit()
     return [by_id[move.id] for move in payload.moves]
+
+
+@router.post("/scatter", response_model=PointScatterResult)
+async def scatter_points(
+    payload: PointScatter, device: OwnedDevice, db: DbSession
+) -> PointScatterResult:
+    """Ekim alanına rastgele bitki serpiştirir.
+
+    Neden rastgele ama denetimli:
+      Tamamen rastgele noktalar üst üste biner; iki fide aynı çukura düşer.
+      Bu yüzden her aday nokta, hem daha önce yerleştirilenlerden hem de
+      (istenirse) bahçedeki mevcut bitkilerden yayılma çapı kadar uzak olmak
+      zorunda. Aday tutmazsa yenisi deneniyor.
+
+      Alan dolduğunda sonsuza kadar denemek yerine pes ediyoruz ve kaç tane
+      yerleştirilemediğini **söylüyoruz**. Sessizce eksik ekmek, kullanıcının
+      "20 tane istedim, 12 tane var" diye sonradan fark edeceği bir sürpriz olurdu.
+    """
+    species = await db.get(PlantSpecies, payload.species_id)
+    if species is None:
+        raise HTTPException(404, detail="Bitki türü bulunamadı")
+
+    x_min, x_max, y_min, y_max = machine_config.planting_bounds(device)
+
+    spread = payload.spread_mm if payload.spread_mm is not None else float(species.spread_mm)
+    radius = spread / 2
+
+    # Bitkinin gövdesi ekim alanının dışına taşmasın: merkez, kenardan
+    # yarıçap kadar içeride başlasın. Alan yarıçaptan darsa ortaya tek sıra.
+    ax_min, ax_max = x_min + radius, x_max - radius
+    ay_min, ay_max = y_min + radius, y_max - radius
+    if ax_min > ax_max:
+        ax_min = ax_max = (x_min + x_max) / 2
+    if ay_min > ay_max:
+        ay_min = ay_max = (y_min + y_max) / 2
+
+    yerlesik: list[tuple[float, float]] = []
+    if payload.avoid_existing:
+        mevcut = await db.execute(
+            select(Point.x, Point.y).where(
+                Point.device_id == device.id,
+                Point.point_type == PointType.PLANT,
+                Point.discarded_at.is_(None),
+            )
+        )
+        yerlesik = [(row.x, row.y) for row in mevcut]
+
+    # `seed` verilirse aynı istek aynı deseni üretiyor: önizlemede gördüğü
+    # yerleşimin ekim sırasında değişmemesi gerekiyor.
+    rastgele = random.Random(payload.seed)
+
+    # Her bitki için sınırlı deneme: alan dolduysa döngü kilitlenmesin
+    DENEME_HAKKI = 60
+    yeni_noktalar: list[Point] = []
+
+    for _ in range(payload.count):
+        for _ in range(DENEME_HAKKI):
+            x = rastgele.uniform(ax_min, ax_max)
+            y = rastgele.uniform(ay_min, ay_max)
+            # İki bitkinin merkezleri, yayılma çapından yakın olmamalı
+            if all((x - px) ** 2 + (y - py) ** 2 >= spread**2 for px, py in yerlesik):
+                yerlesik.append((x, y))
+                yeni_noktalar.append(
+                    Point(
+                        device_id=device.id,
+                        point_type=PointType.PLANT,
+                        name=species.name_tr,
+                        x=round(x, 1),
+                        y=round(y, 1),
+                        z=0.0,
+                        radius_mm=radius,
+                        species_id=species.id,
+                        depth_mm=species.sow_depth_mm,
+                    )
+                )
+                break
+
+    db.add_all(yeni_noktalar)
+    await db.commit()
+    for point in yeni_noktalar:
+        await db.refresh(point)
+
+    yerlesen = len(yeni_noktalar)
+    atlanan = payload.count - yerlesen
+    detay = f"{yerlesen} {species.name_tr} ekim alanına yerleştirildi"
+    if atlanan:
+        detay += (
+            f"; {atlanan} tanesine yer kalmadı "
+            f"({spread:.0f} mm aralıkla alan doldu)"
+        )
+
+    return PointScatterResult(
+        created=[PointRead.model_validate(p) for p in yeni_noktalar],
+        requested=payload.count,
+        placed=yerlesen,
+        skipped=atlanan,
+        detail=detay,
+    )
 
 
 @router.delete("/{point_id}", response_model=Message)
