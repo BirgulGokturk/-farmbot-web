@@ -6,7 +6,7 @@
  * robotun canlı konumuna göre hareket eder.
  */
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Grid, Html, OrbitControls } from "@react-three/drei";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -777,6 +777,18 @@ function Scene({
   const beamY = toolRestY + TOOL_LENGTH + PROFILE * 3;
   const portal = beamY - benchHeight;
 
+  /**
+   * Y milimetresini sahne derinliğine çevirir.
+   *
+   * Makinenin **Y sıfırı uzak rayda**: panelde varsayılan açıdan bakınca
+   * başlangıç noktası solda kalıyor, gerçek makinedeki gibi. Doğrudan
+   * `y * MM` kullanmak sıfırı yakın raya, yani ekranın sağına düşürüyordu.
+   *
+   * Hem araba hem bitkiler bu eşlemeyi kullanmak zorunda; biri ham değeri
+   * kullansaydı robot ile bitkiler ters uçlarda görünürdü.
+   */
+  const yToScene = useCallback((mm: number) => length - mm * MM, [length]);
+
   const plants = useMemo(
     () => points.filter((p) => p.point_type === "plant" && p.species),
     [points],
@@ -842,7 +854,7 @@ function Scene({
         toolRestY={toolRestY}
         zTravel={zTravel}
         tool={tool}
-        target={{ x: position.x * MM, y: position.y * MM, z: position.z * MM }}
+        target={{ x: position.x * MM, y: yToScene(position.y), z: position.z * MM }}
       />
 
       {/* Bitkiler tezgâh düzleminde duruyor */}
@@ -850,7 +862,7 @@ function Scene({
         <Plant3D
           key={plant.id}
           x={plant.x * MM}
-          z={plant.y * MM}
+          z={yToScene(plant.y)}
           base={soilY}
           radius={Math.max(0.02, plant.radius_mm * MM)}
           species={plant.species!}
@@ -906,6 +918,8 @@ function RobotRig({
       gantry.current.position.x += (target.x - gantry.current.position.x) * SMOOTHING;
     }
     if (carriage.current) {
+      // `target.y` sahne derinliği olarak geliyor (bkz. yToScene); burada
+      // ayrıca çevirmiyoruz.
       carriage.current.position.z += (target.y - carriage.current.position.z) * SMOOTHING;
     }
     if (zAxis.current) {
