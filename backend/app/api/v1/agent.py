@@ -466,6 +466,10 @@ def _auto_create_sensor(device_id: uuid.UUID, channel: str) -> Sensor:
         min_value=spec.min_value,
         max_value=spec.max_value,
         pin=None,
+        # Teşhis kanalları kapalı başlıyor: ölçüm kaydedilmeye devam ediyor
+        # ama grafik listesini şişirmiyorlar. Kalibrasyon gerektiğinde
+        # Sensörler sayfasından açılıyor.
+        installed=not spec.diagnostic,
     )
 
 

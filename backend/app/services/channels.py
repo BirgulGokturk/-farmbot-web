@@ -23,6 +23,14 @@ class ChannelSpec:
     icon: str
     min_value: float
     max_value: float
+    # Teşhis kanalı mı? Bunlar panelde **kapalı** başlıyor.
+    #
+    # Ham ADC değeri ve eşik, sensörü kalibre ederken vazgeçilmez — yağmur
+    # eşiğinin ters olduğunu ancak ikisini yan yana görünce anladık. Ama iş
+    # bitince grafik listesini şişiriyorlar ve gerçek ölçümlerin arasında
+    # kayboluyorlar. Silmek yerine gizliyoruz: yeniden kalibrasyon
+    # gerektiğinde Sensörler sayfasından açmak yeterli.
+    diagnostic: bool = False
 
 
 # Kullanıcının elindeki donanım: BMP180 (GY-68), DHT11/DHT22, HW-103
@@ -46,13 +54,13 @@ KNOWN_CHANNELS: dict[str, ChannelSpec] = {
     # Ham ADC — eşiği ayarlamak için. Yüzde değil, 0–1023 sayaç.
     "hw103_rain_raw": ChannelSpec(
         "Yağmur (ham ADC)", SensorKind.GENERIC, "", "📶", 0, 1023
-    ),
+    , diagnostic=True),
     # Kararın hangi sınıra göre verildiği. Ham değerin yanında durması gerekiyor:
     # sahada eşiğin yanlış olduğunu ancak ikisini yan yana görünce fark ettik
     # (sensör kuruyken 336–495 okuyor, eşik 600'dü, panel sürekli "yağmur" diyordu).
     "rain_threshold": ChannelSpec(
         "Yağmur eşiği", SensorKind.GENERIC, "", "🎚️", 0, 1023
-    ),
+    , diagnostic=True),
     # Ham ADC değeri — yüzde değil. Kalibrasyon (SOIL_DRY / SOIL_WET) bunu
     # izleyerek yapılır, bu yüzden ayrı kanal olarak tutuluyor.
     "hw103_soil_raw": ChannelSpec(
