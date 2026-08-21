@@ -240,6 +240,19 @@ export interface Curve {
 // Donanım
 // --------------------------------------------------------------------------- //
 
+/**
+ * Çevre biriminin görevi.
+ *
+ * `kind` nasıl sürüldüğünü söylüyor (röle mi servo mu), `role` ne işe
+ * yaradığını. Sulama komutu "su pompası hangisi" diye buna bakıyor.
+ */
+export type PeripheralRoleValue =
+  | "generic"
+  | "water_pump"
+  | "air_pump"
+  | "vacuum"
+  | "valve";
+
 export interface Peripheral {
   id: string;
   device_id: string;
@@ -248,6 +261,9 @@ export interface Peripheral {
   mode: number;
   icon: string;
   kind: PeripheralKind;
+  role: PeripheralRoleValue;
+  /** Yalnızca su pompasında anlamlı: hacimden süre hesaplanıyor. */
+  flow_rate_ml_per_s: number | null;
   /** Servo aç/kapa anahtarının geçiş yaptığı iki açı */
   servo_open_angle: number;
   servo_closed_angle: number;

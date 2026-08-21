@@ -28,7 +28,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import PeripheralKind, SensorKind
+from app.models.enums import PeripheralKind, PeripheralRole, SensorKind
 
 
 class Peripheral(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -47,6 +47,17 @@ class Peripheral(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     kind: Mapped[PeripheralKind] = mapped_column(
         SAEnum(PeripheralKind, native_enum=False), default=PeripheralKind.DIGITAL
     )
+
+    # Birimin işlevi. Sulama komutu "su pompası hangisi" diye buna bakıyor;
+    # önceden pin sabit 8 varsayılıyordu ve kullanıcının tanımı yok sayılıyordu.
+    role: Mapped[PeripheralRole] = mapped_column(
+        SAEnum(PeripheralRole, native_enum=False), default=PeripheralRole.GENERIC
+    )
+
+    # Sulama süresi su hacminden hesaplanırken gerekiyor. Önceden bu değer
+    # `Tool` üzerindeydi: pompa "Çevre Birimleri"nde, debisi "Aletler"de
+    # duruyordu ve ikisini eşleştiren bir şey yoktu.
+    flow_rate_ml_per_s: Mapped[float | None] = mapped_column(Float)
 
     # --- Yalnızca servo için ---
     # Aç/kapa anahtarı bu iki açı arasında geçiş yapar. Mekanik hazır olmadığı

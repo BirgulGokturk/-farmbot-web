@@ -24,6 +24,7 @@ import type {
   LogEntry,
   Page,
   Peripheral,
+  PeripheralRoleValue,
   PlantSpecies,
   GantryStatus,
   PairingCode,
@@ -435,7 +436,16 @@ export const api = {
 
   hardware: {
     peripherals: (deviceId: string) => request<Peripheral[]>(`/devices/${deviceId}/peripherals`),
-    createPeripheral: (deviceId: string, input: { label: string; pin: number; icon?: string }) =>
+    createPeripheral: (
+      deviceId: string,
+      input: {
+        label: string;
+        pin: number;
+        icon?: string;
+        role?: PeripheralRoleValue;
+        flow_rate_ml_per_s?: number;
+      },
+    ) =>
       request<Peripheral>(`/devices/${deviceId}/peripherals`, { method: "POST", body: input }),
     removePeripheral: (deviceId: string, id: string) =>
       request<{ detail: string }>(`/devices/${deviceId}/peripherals/${id}`, { method: "DELETE" }),

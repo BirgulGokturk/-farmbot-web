@@ -14,8 +14,8 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession, OwnedDevice, ensure_unlocked
 from app.db.base import utcnow
-from app.models import Device, Point, Sensor, Tool
-from app.models.enums import PlantStage, PointType
+from app.models import Device, Peripheral, Point, Sensor, Tool
+from app.models.enums import PeripheralRole, PlantStage, PointType
 from app.schemas.control import (
     CommandResponse,
     ExecuteSequenceRequest,
@@ -170,18 +170,36 @@ async def water_point(
     if point is None:
         raise HTTPException(404, detail="Bitki bulunamadı")
 
+    # Pompayı **kullanıcının tanımından** buluyoruz.
+    #
+    # Önceden pin sabit 8 varsayılıyordu: panelde "Su pompası, pin 7" tanımlı
+    # olsa bile sulama pin 8'i sürüyor, hiçbir şey olmuyor ve sebebi de
+    # anlaşılmıyordu. İstek açıkça bir pin verirse ona saygı gösteriyoruz
+    # (dizi editörü gibi ileri kullanımlar için), yoksa tanımlı su pompasını
+    # arıyoruz.
+    pompa = await _su_pompasi(db, device.id)
+    if payload.pump_pin is None and pompa is None:
+        raise HTTPException(
+            422,
+            detail=(
+                "Su pompası tanımlı değil. Ayarlar → Çevre Birimleri'nden "
+                "bir birim ekleyip görevini 'Su pompası' seçin."
+            ),
+        )
+    pump_pin = payload.pump_pin if payload.pump_pin is not None else pompa.pin
+
     duration_ms = payload.duration_ms
     if duration_ms is None:
         if payload.volume_ml is None:
             raise HTTPException(422, detail="duration_ms veya volume_ml verilmeli")
-        duration_ms = await _duration_from_volume(db, device.id, payload.volume_ml)
+        duration_ms = await _duration_from_volume(db, device.id, payload.volume_ml, pompa)
 
     body = commands.water_at(
         x=point.x,
         y=point.y,
         z=device.soil_height_mm,
         duration_ms=duration_ms,
-        pump_pin=payload.pump_pin,
+        pump_pin=pump_pin,
         speed=payload.speed,
         safe_z=device.safe_height_mm,
     )
@@ -189,8 +207,33 @@ async def water_point(
     return await _dispatch(device, body, wait=False)
 
 
-async def _duration_from_volume(db: DbSession, device_id: uuid.UUID, volume_ml: int) -> int:
-    """Su hacmini, sulama ucunun debisine bakarak milisaniyeye çevirir."""
+async def _su_pompasi(db: DbSession, device_id: uuid.UUID) -> Peripheral | None:
+    """Görevi 'su pompası' olarak işaretlenmiş çevre birimi."""
+    result = await db.execute(
+        select(Peripheral).where(
+            Peripheral.device_id == device_id,
+            Peripheral.role == PeripheralRole.WATER_PUMP,
+        )
+    )
+    return result.scalars().first()
+
+
+async def _duration_from_volume(
+    db: DbSession,
+    device_id: uuid.UUID,
+    volume_ml: int,
+    pompa: Peripheral | None = None,
+) -> int:
+    """Su hacmini debiye bakarak milisaniyeye çevirir.
+
+    Debi önce pompanın kendi kaydında aranıyor. Eskiden yalnızca `Tool`
+    üzerinde tutuluyordu: pompa "Çevre Birimleri"nde, debisi "Aletler"de
+    duruyordu ve ikisini eşleştiren bir şey yoktu. Eski kurulumlar bozulmasın
+    diye alet tarafına da bakmaya devam ediyoruz.
+    """
+    if pompa is not None and pompa.flow_rate_ml_per_s:
+        return int(volume_ml / pompa.flow_rate_ml_per_s * 1000)
+
     result = await db.execute(
         select(Tool).where(Tool.device_id == device_id, Tool.flow_rate_ml_per_s.is_not(None))
     )
@@ -198,7 +241,10 @@ async def _duration_from_volume(db: DbSession, device_id: uuid.UUID, volume_ml: 
     if tool is None or not tool.flow_rate_ml_per_s:
         raise HTTPException(
             422,
-            detail="Debisi tanımlı bir sulama ucu yok. duration_ms gönderin veya alete debi ekleyin.",
+            detail=(
+                "Debi tanımlı değil. Ayarlar → Çevre Birimleri'nden su "
+                "pompasına debi girin ya da süreyi doğrudan verin."
+            ),
         )
     return int(volume_ml / tool.flow_rate_ml_per_s * 1000)
 

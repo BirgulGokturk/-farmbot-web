@@ -9,6 +9,7 @@ import {
   CardHeader,
   Input,
   PageHeader,
+  Select,
   Toggle,
 } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
@@ -24,7 +25,7 @@ import { api } from "@/lib/api";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
 import { useAuth } from "@/store/useAuth";
 import { useTheme } from "@/store/useTheme";
-import type { Device } from "@/lib/types";
+import type { Device, PeripheralRoleValue } from "@/lib/types";
 
 export default function SettingsPage() {
   const { data: device } = useActiveDevice();
@@ -268,6 +269,8 @@ function HardwareSettings() {
   const queryClient = useQueryClient();
   const [label, setLabel] = useState("");
   const [pin, setPin] = useState("");
+  const [role, setRole] = useState<PeripheralRoleValue>("generic");
+  const [debi, setDebi] = useState("");
 
   const { data: peripherals } = useQuery({
     queryKey: ["peripherals", deviceId],
@@ -277,11 +280,21 @@ function HardwareSettings() {
 
   const add = useMutation({
     mutationFn: () =>
-      api.hardware.createPeripheral(deviceId!, { label, pin: Number(pin) }),
+      api.hardware.createPeripheral(deviceId!, {
+        label,
+        pin: Number(pin),
+        role,
+        // Debi yalnızca su pompasında anlamlı: sulama "200 ml" isteğini
+        // süreye buradan çeviriyor
+        flow_rate_ml_per_s:
+          role === "water_pump" && debi ? Number(debi.replace(",", ".")) : undefined,
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["peripherals", deviceId] });
       setLabel("");
       setPin("");
+      setRole("generic");
+      setDebi("");
       toast.success("Çevre birimi eklendi");
     },
     onError: (error) => toast.error("Eklenemedi", (error as Error).message),
@@ -349,6 +362,39 @@ function HardwareSettings() {
           onChange={(e) => setPin(e.target.value)}
         />
       </div>
+
+      {/* Görev, birimin **ne işe yaradığını** söylüyor. Sulama komutu buna
+          bakıp doğru pini sürüyor; önceden pin sabit 8 varsayılıyordu ve
+          kullanıcının tanımı yok sayılıyordu. */}
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <Select
+          name="role"
+          value={role}
+          onChange={(e) => setRole(e.target.value as PeripheralRoleValue)}
+        >
+          <option value="generic">Görev: genel</option>
+          <option value="water_pump">Su pompası</option>
+          <option value="air_pump">Hava pompası</option>
+          <option value="valve">Vana</option>
+          <option value="vacuum">Vakum</option>
+        </Select>
+        {role === "water_pump" && (
+          <Input
+            name="debi"
+            placeholder="Debi ml/s"
+            inputMode="decimal"
+            value={debi}
+            onChange={(e) => setDebi(e.target.value)}
+          />
+        )}
+      </div>
+
+      {role === "water_pump" && (
+        <p className="mt-1.5 text-xs leading-relaxed text-subtle">
+          Debi, "200 ml sula" isteğini süreye çevirmek için kullanılıyor. Boş
+          bırakırsanız sulama süresini doğrudan vermeniz gerekir.
+        </p>
+      )}
       <Button
         className="mt-2"
         fullWidth

@@ -51,7 +51,9 @@ class WaterPointRequest(BaseModel):
     point_id: uuid.UUID
     duration_ms: int | None = Field(default=None, gt=0, le=600_000)
     volume_ml: int | None = Field(default=None, gt=0, le=100_000)
-    pump_pin: int = Field(default=8, ge=0, le=69)
+    # Boş bırakılırsa görevi "su pompası" olan çevre birimi kullanılıyor.
+    # Sabit 8 varsayımı, kullanıcının kendi tanımını yok sayıyordu.
+    pump_pin: int | None = Field(default=None, ge=0, le=69)
     speed: int = Field(default=100, ge=1, le=100)
 
 

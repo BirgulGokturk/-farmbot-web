@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import PeripheralKind, SensorKind
+from app.models.enums import PeripheralKind, PeripheralRole, SensorKind
 from app.schemas.common import ORMModel
 
 
@@ -17,6 +17,9 @@ class PeripheralCreate(BaseModel):
     mode: int = Field(default=0, ge=0, le=1)
     icon: str = "💡"
     kind: PeripheralKind = PeripheralKind.DIGITAL
+    # Görev: sulama komutu "su pompası hangisi" diye buna bakıyor
+    role: PeripheralRole = PeripheralRole.GENERIC
+    flow_rate_ml_per_s: float | None = Field(default=None, gt=0, le=10000)
     servo_open_angle: int = Field(default=90, ge=0, le=180)
     servo_closed_angle: int = Field(default=0, ge=0, le=180)
 
@@ -26,6 +29,8 @@ class PeripheralUpdate(BaseModel):
     pin: int | None = Field(default=None, ge=0, le=69)
     icon: str | None = None
     kind: PeripheralKind | None = None
+    role: PeripheralRole | None = None
+    flow_rate_ml_per_s: float | None = Field(default=None, gt=0, le=10000)
     servo_open_angle: int | None = Field(default=None, ge=0, le=180)
     servo_closed_angle: int | None = Field(default=None, ge=0, le=180)
 
@@ -38,6 +43,8 @@ class PeripheralRead(ORMModel):
     mode: int
     icon: str
     kind: PeripheralKind
+    role: PeripheralRole
+    flow_rate_ml_per_s: float | None
     servo_open_angle: int
     servo_closed_angle: int
 

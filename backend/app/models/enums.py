@@ -53,6 +53,24 @@ class PeripheralKind(str, Enum):
     SERVO = "servo"      # 0–180° açı
 
 
+class PeripheralRole(str, Enum):
+    """Çevre biriminin **işlevi** — sistemin onu tanıyabilmesi için.
+
+    `kind` nasıl sürüldüğünü söylüyor (röle mi, servo mu). `role` ise ne işe
+    yaradığını: sulama komutu "su pompası hangisi" diye sorabilsin.
+
+    Buna ihtiyaç vardı çünkü sulama pompanın pinini **sabit 8** varsayıyordu.
+    Kullanıcı panelde "Su pompası, pin 7" tanımlasa bile sulama pin 8'i
+    sürüyordu ve hiçbir şey olmuyordu; panel kendi tanımını kullanmıyordu.
+    """
+
+    GENERIC = "generic"      # lamba, fan, genel amaçlı röle
+    WATER_PUMP = "water_pump"
+    AIR_PUMP = "air_pump"
+    VACUUM = "vacuum"        # tohum ucu vakumu
+    VALVE = "valve"
+
+
 class CurveType(str, Enum):
     WATER = "water"
     SPREAD = "spread"
