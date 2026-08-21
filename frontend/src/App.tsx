@@ -15,6 +15,7 @@ import Dashboard from "@/pages/Dashboard";
 
 // Ağır sayfalar ilk yüklemede indirilmesin
 const ManualControl = lazy(() => import("@/pages/ManualControl"));
+const GantryStudio = lazy(() => import("@/pages/GantryStudio"));
 const Designer = lazy(() => import("@/pages/Designer"));
 const Viewer3D = lazy(() => import("@/pages/Viewer3D"));
 const Sensors = lazy(() => import("@/pages/Sensors"));
@@ -129,6 +130,7 @@ export default function App() {
           <Route path="camera" element={<CameraPage />} />
           <Route path="sensors" element={<Sensors />} />
           <Route path="control" element={<ManualControl />} />
+          <Route path="gantry" element={<GantryStudio />} />
           <Route path="sequences" element={<Sequences />} />
           <Route path="tool-zone" element={<ToolZone />} />
           <Route path="designer" element={<Designer />} />

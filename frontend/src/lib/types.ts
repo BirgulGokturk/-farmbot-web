@@ -139,6 +139,12 @@ export interface PlantSpecies {
 }
 
 /** Rastgele serpiştirme sonucu — alan dolduysa `skipped` kaç tane sığmadığını söyler. */
+/** Gantry Studio sekmesi bu kurulumda var mı? */
+export interface GantryStatus {
+  enabled: boolean;
+  url: string | null;
+}
+
 /** Ajanı bağlamak için panelde gösterilen kısa ömürlü kod. */
 export interface PairingCode {
   code: string;

@@ -80,6 +80,12 @@ export const NAV_GROUPS: NavGroup[] = [
         primary: true,
       },
       {
+        path: "/gantry",
+        label: "Hareket Kontrolü",
+        icon: Gamepad2,
+        description: "Gantry Studio — eksen sürme, ev arama, kalibrasyon",
+      },
+      {
         path: "/sequences",
         label: "Diziler",
         icon: Workflow,

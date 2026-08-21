@@ -42,6 +42,20 @@ class Settings(BaseSettings):
     # ayar, ayrı bir port ve CORS gerekmiyor.
     FRONTEND_DIST: str | None = None
 
+    # --- Gantry Studio'yu panelin içinde göstermek ---
+    #
+    # Ortağın hareket arayüzü Pi'de ayrı bir sunucuda (localhost:8091) çalışıyor
+    # ve sahada kusursuz çalışan kısım orası. Panelin içinde bir sekmede
+    # göstermek istiyoruz ama tarayıcılar HTTPS bir sayfanın içine HTTP bir
+    # sayfa gömülmesini engelliyor ("karışık içerik"), üstelik Pi'nin yerel
+    # adresi dışarıdan erişilebilir de değil.
+    #
+    # Çözüm: istekleri kendi sunucumuz üzerinden geçirmek. Böylece tarayıcı
+    # açısından her şey tek bir kaynaktan (aynı adres, aynı sertifika) geliyor.
+    #
+    # Boşsa hiçbir şey değişmiyor; bulut kurulumu aynen çalışmaya devam ediyor.
+    GANTRY_PROXY_URL: str | None = None
+
     # --- CORS ---
     # NoDecode şart: pydantic-settings, liste tipindeki alanları ortam
     # değişkeninden okurken önce JSON olarak ayrıştırmayı dener ve

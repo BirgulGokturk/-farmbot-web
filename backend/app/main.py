@@ -90,6 +90,25 @@ app.add_middleware(
 
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
+# --------------------------------------------------------------------------- #
+# Gantry Studio vekili
+# --------------------------------------------------------------------------- #
+#
+# Sıralama önemli: vekilin `/api/{yol}` yakalayıcısı **bizim** yönlendiricimizden
+# sonra kayıtlı olmalı. Starlette ilk eşleşeni seçtiği için `/api/v1/...`
+# istekleri önce bizim uçlarımıza düşüyor; geri kalan `/api/...` yolları
+# Gantry Studio'ya gidiyor.
+#
+# `GANTRY_PROXY_URL` boşsa vekil hiç bağlanmıyor: bulut kurulumunda fazladan
+# tek bir yönlendirme bile olmasın.
+from app.api import gantry_proxy  # noqa: E402
+
+app.include_router(gantry_proxy.session_router, prefix=settings.API_V1_PREFIX)
+
+if gantry_proxy.gantry_enabled():
+    app.include_router(gantry_proxy.router)
+    logger.info("Gantry Studio vekili etkin: %s", settings.GANTRY_PROXY_URL)
+
 # Kamera fotoğraflarını yerel diskten servis et (bulutta S3'e taşınır)
 os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
 app.mount(

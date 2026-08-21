@@ -15,7 +15,17 @@ from app.core.config import settings
 # uzun parolalarda beklenmedik davranış olmasın.
 _BCRYPT_MAX_BYTES = 72
 
-TokenType = Literal["access", "refresh"]
+# "gantry": Gantry Studio sekmesinin çerezi.
+#
+# Neden ayrı bir tür: gömülü sayfa bizim `Authorization` başlığımızı taşımıyor,
+# bu yüzden yetkiyi çerezle veriyoruz. Erişim token'ıyla aynı türü kullansaydık
+# çerezi ele geçiren biri onu tüm API'de kullanabilirdi; ayrı tür sayesinde bu
+# çerez yalnızca vekilde geçerli.
+TokenType = Literal["access", "refresh", "gantry"]
+
+# Gantry çerezinin ömrü. Kısa tutuluyor: panel sekmeyi her açtığında yenisini
+# alıyor, yani kullanıcı bir şey fark etmiyor.
+GANTRY_TOKEN_MINUTES = 720
 
 
 def hash_password(password: str) -> str:
@@ -38,11 +48,12 @@ def create_token(
     extra_claims: dict[str, Any] | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
-    expires = (
-        now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        if token_type == "access"
-        else now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    )
+    if token_type == "access":
+        expires = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    elif token_type == "gantry":
+        expires = now + timedelta(minutes=GANTRY_TOKEN_MINUTES)
+    else:
+        expires = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     claims: dict[str, Any] = {
         "sub": str(subject),
         "type": token_type,

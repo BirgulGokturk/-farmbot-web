@@ -25,6 +25,7 @@ import type {
   Page,
   Peripheral,
   PlantSpecies,
+  GantryStatus,
   PairingCode,
   Point,
   ScatterResult,
@@ -383,6 +384,22 @@ export const api = {
     /** Kısa ömürlü eşleştirme kodu — 56 karakterlik token'ı elle taşımaya gerek kalmasın. */
     createPairingCode: (deviceId: string) =>
       request<PairingCode>(`/devices/${deviceId}/pairing-code`, { method: "POST" }),
+  },
+
+  gantry: {
+    /** Sekme gösterilsin mi? Vekil yapılandırılmamışsa menüde yer almıyor. */
+    status: () => request<GantryStatus>("/gantry/status"),
+    /**
+     * Gömülü sayfanın kullanacağı çerezi alır.
+     *
+     * `credentials: "include"` şart: çerez ancak böyle yerleşiyor ve sonraki
+     * çerçeve istekleriyle birlikte gidiyor.
+     */
+    session: () =>
+      request<{ url: string; expires_minutes: number }>("/gantry/session", {
+        method: "POST",
+        credentials: "include",
+      }),
   },
 
   alerts: {
