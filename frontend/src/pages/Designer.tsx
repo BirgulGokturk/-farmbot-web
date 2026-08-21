@@ -392,12 +392,24 @@ export default function Designer() {
       ? species.filter((s) => s.name_tr.toLocaleLowerCase("tr").includes(query))
       : species;
 
-    return [...eslesen].sort((a, b) => {
-      const fa = turAyarlari[a.slug]?.favorite ? 0 : 1;
-      const fb = turAyarlari[b.slug]?.favorite ? 0 : 1;
-      return fa - fb;
-    });
-  }, [species, search, turAyarlari]);
+    return eslesen;
+  }, [species, search]);
+
+  /**
+   * Palet iki gruba ayrılıyor: favoriler ve gerisi.
+   *
+   * Yalnızca sıralamak yetmiyordu — favoriler listenin başına gidiyor ama
+   * aradaki sınır görünmediği için sıra rastgele duruyordu. Başlıklı grup,
+   * "bunlar benim seçtiklerim" bilgisini bir bakışta veriyor.
+   */
+  const paletGruplari = useMemo(() => {
+    const favoriler = filteredSpecies.filter((s) => turAyarlari[s.slug]?.favorite);
+    const digerleri = filteredSpecies.filter((s) => !turAyarlari[s.slug]?.favorite);
+    return [
+      { baslik: "Favoriler", turler: favoriler },
+      { baslik: favoriler.length ? "Tüm bitkiler" : "", turler: digerleri },
+    ].filter((g) => g.turler.length > 0);
+  }, [filteredSpecies, turAyarlari]);
 
   const plantCount = points?.filter((p) => p.point_type === "plant").length ?? 0;
 
@@ -558,8 +570,22 @@ export default function Designer() {
             suffix={<Search className="size-4" />}
             className="mb-3"
           />
-          <div className="grid max-h-[420px] grid-cols-2 gap-2 overflow-y-auto pr-1 xl:grid-cols-1">
-            {filteredSpecies.map((item) => (
+          <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
+            {paletGruplari.map((grup) => (
+              <div key={grup.baslik || "hepsi"}>
+                {grup.baslik && (
+                  <p className="mb-1.5 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-wider text-subtle">
+                    {grup.baslik === "Favoriler" && (
+                      <Star className="size-3 fill-current text-warning" />
+                    )}
+                    {grup.baslik}
+                    <span className="font-normal normal-case tracking-normal">
+                      ({grup.turler.length})
+                    </span>
+                  </p>
+                )}
+                <div className="grid grid-cols-2 gap-2 xl:grid-cols-1">
+            {grup.turler.map((item) => (
               <button
                 key={item.id}
                 onPointerDown={(event) => {
@@ -588,8 +614,11 @@ export default function Designer() {
                 )}
               </button>
             ))}
+                </div>
+              </div>
+            ))}
             {!filteredSpecies.length && (
-              <p className="col-span-full py-6 text-center text-sm text-subtle">Eşleşen bitki yok</p>
+              <p className="py-6 text-center text-sm text-subtle">Eşleşen bitki yok</p>
             )}
           </div>
         </Card>

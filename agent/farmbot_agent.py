@@ -42,6 +42,7 @@ except ImportError as exc:  # pragma: no cover - kurulum yardımı
     print("Kurulum:  pip install pyserial httpx websockets", file=sys.stderr)
     raise SystemExit(1)
 
+import telemetri  # noqa: E402  (yerel modül)
 from gantry import GantryClient, to_status_tree  # noqa: E402  (yerel modül)
 
 logger = logging.getLogger("farmbot-agent")
@@ -520,6 +521,9 @@ class Agent:
             tree = to_status_tree(
                 status, self.gantry.calibration, self.gantry.last_latency_ms
             )
+            # Pi'nin kendi durumu — panelin "Sistem Sağlığı" kartı bunu
+            # bekliyordu ama hiç göndermiyorduk, kart boş duruyordu.
+            tree["informational_settings"].update(telemetri.topla())
             position = tree["location_data"]["position"]
             # Konumu 0.1 mm çözünürlükte imzala: gürültüden dolayı sürekli
             # mesaj gitmesin
