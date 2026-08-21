@@ -49,17 +49,33 @@ Servo tarimServo;
 // kuruyken ve üstüne birkaç damla su damlattığında okunan değerlerin
 // ortasını buraya yaz.
 /*
- * Yağmur eşiği — ham ADC değeri bunun ALTINDAYSA "ıslak" sayılıyor.
+ * Yağmur eşiği — ham ADC değeri bunun ÜSTÜNDEYSE "ıslak" sayılıyor.
  *
- * Sahada doğrulanmadan kullanılamaz: 600 bir tahmindi ve elimizdeki sensör
- * kuruyken 336–495 arası okuyordu, yani panel sürekli "yağmur var" diyor ve
- * Arduino boşuna vanayı açıyordu.
+ * Yön sahada ölçülerek bulundu: bu sensör kuruyken **286**, ıslakken **500**
+ * okuyor. Yani su değdikçe değer YÜKSELİYOR. Eskizin ilk sürümü tersini
+ * varsayıyordu (`ham < eşik → ıslak`) ve bu yüzden kuru sensörde bile sürekli
+ * "yağmur var" deyip vanayı açıyordu.
  *
- * Doğru değeri bulmak için sensörü kuruyken ve ıslakken okuyup ortasını alın.
+ * Eşik iki ucun ortası: (286 + 500) / 2 ≈ 393.
+ *
  * `ESIK <sayi>` komutuyla çalışırken değiştirilebiliyor; her denemede eskizi
  * yeniden yüklemek gerekmiyor.
  */
-int suEsikDegeri = 600;
+int suEsikDegeri = 393;
+
+/*
+ * Histerezis — kararın sınırda titrememesi için.
+ *
+ * Sahada kuru sensörün iki saniyede 336'dan 495'e sıçradığını gördük. Tek bir
+ * eşikle bu gürültü, saniyede bir "yağmur var / yok" demek ve vanayı sürekli
+ * açıp kapamak anlamına gelirdi.
+ *
+ * Bu yüzden iki sınır var: ıslak demek için eşiğin bu kadar üstüne çıkmak,
+ * kuru demek için bu kadar altına inmek gerekiyor. Arada kalan bölgede son
+ * karar korunuyor.
+ */
+const int ESIK_HISTEREZIS = 40;
+bool islakMi = false;
 
 // --- TOPRAK NEMİ (sensör takıldığında) ---
 // Kalibrasyon: probu havada tutunca okunan değer -> TOPRAK_KURU,
@@ -127,7 +143,7 @@ void loop() {
   }
 
   // --- HW-103 YAĞMUR SENSÖRÜ ---
-  int yagmurDegeri = analogRead(YAGMUR_PIN);
+  int yagmurDegeri = yagmurOku();
 
   // Sensör verilerinde okuma hatası var mı kontrol et
   if (isnan(nem) || isnan(dhtSicaklik)) {
@@ -153,9 +169,14 @@ void loop() {
   Serial.println(yagmurDegeri);
 
   // --- OTONOM KARAR MEKANİZMASI ---
+  // Islaklık kararını tek yerde veriyoruz: servo da panel de aynı sonucu
+  // görsün. İki ayrı yerde hesaplansaydı biri histerezisli, diğeri değil
+  // olurdu ve panel "kuru" derken vana açık kalabilirdi.
+  islaklikGuncelle(yagmurDegeri);
+
   // Panelden elle komut verildiyse (otomatikKip = false) karışmıyoruz.
   if (otomatikKip) {
-    if (yagmurDegeri < suEsikDegeri) {
+    if (islakMi) {
       Serial.println("DURUM: Yagmur/Su Algilandi! Vana veya Tente Aciliyor...");
       servoyuAyarla(90); // Motor 90 dereceye gider
     } else {
@@ -221,7 +242,8 @@ void paneleGonder(float nem, float dhtSic, float bmpSic,
   // A0'da tek bir yağmur sensörü var. Önceki sürüm bu değeri ayrıca
   // "hw103_soil" ve "hw103_soil_raw" olarak da gönderiyordu; ortada toprak
   // sensörü olmadığı için panel yağmur sensörünü toprak nemi diye gösteriyordu.
-  Serial.print(",\"hw103_rain\":");      Serial.print(yagmurHam < suEsikDegeri ? 1 : 0);
+  // Servo hangi karara göre hareket ettiyse panel de onu görsün
+  Serial.print(",\"hw103_rain\":");      Serial.print(islakMi ? 1 : 0);
   // Ham değer de gidiyor: eşiği panelden bakarak ayarlayabilmek için
   Serial.print(",\"hw103_rain_raw\":");  Serial.print(yagmurHam);
   Serial.print(",\"servo_aci\":");       Serial.print(servoAcisi);
@@ -305,6 +327,50 @@ void komutlariIsle() {
 
   } else {
     cevapVer(false, "bilinmeyen-komut");
+  }
+}
+
+/**
+ * Yağmur sensörünü gürültüden arındırarak okur — beş örneğin ortancası.
+ *
+ * Neden tek okuma yetmiyor: sahada kuru sensörün iki saniye içinde 336'dan
+ * 495'e sıçradığını gördük. Yüksek empedanslı bir analog girişte bu normal;
+ * tek bir sıçrama, kararı yanlış tarafa çeviriyordu.
+ *
+ * Ortalama değil **ortanca** alıyoruz: ortalama, tek bir uç değeri sonuca
+ * taşır; ortanca onu tamamen dışarıda bırakır.
+ */
+int yagmurOku() {
+  int ornekler[5];
+  for (int i = 0; i < 5; i++) {
+    ornekler[i] = analogRead(YAGMUR_PIN);
+    delay(4);  // ADC'nin toparlanması için; ardışık okuma birbirini etkiliyor
+  }
+
+  // Beş eleman için sıralama en anlaşılır yol
+  for (int i = 0; i < 4; i++) {
+    for (int j = i + 1; j < 5; j++) {
+      if (ornekler[j] < ornekler[i]) {
+        int gecici = ornekler[i];
+        ornekler[i] = ornekler[j];
+        ornekler[j] = gecici;
+      }
+    }
+  }
+  return ornekler[2];
+}
+
+/**
+ * Islaklık durumunu histerezisle günceller.
+ *
+ * Değer eşiğin belirgin şekilde üstüne çıkmadan "ıslak", belirgin şekilde
+ * altına inmeden "kuru" demiyoruz. Arada kalan bölgede son karar korunuyor.
+ */
+void islaklikGuncelle(int ham) {
+  if (!islakMi && ham > suEsikDegeri + ESIK_HISTEREZIS) {
+    islakMi = true;
+  } else if (islakMi && ham < suEsikDegeri - ESIK_HISTEREZIS) {
+    islakMi = false;
   }
 }
 
