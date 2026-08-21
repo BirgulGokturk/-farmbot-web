@@ -7,134 +7,16 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Move3d, Sprout, SquareDashed } from "lucide-react";
+import { Move3d, Sprout } from "lucide-react";
 
-import { Button, Card, CardHeader, Input, Toggle } from "@/components/ui/primitives";
+import { Button, Card, CardHeader, Toggle } from "@/components/ui/primitives";
 import { NumberField } from "@/components/ui/NumberField";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
-import { readMachineConfig, type PlantingArea, type SeederConfig } from "@/lib/machine";
+import { readMachineConfig, type SeederConfig } from "@/lib/machine";
 import { useServerForm } from "@/hooks/useServerForm";
 import { useBotPosition } from "@/store/useBot";
 import type { Device } from "@/lib/types";
-
-/** Boş bırakılabilen sayı kutusu: boş = "sınır yok". */
-function OptionalNumber({
-  label,
-  value,
-  placeholder,
-  onChange,
-}: {
-  label: string;
-  value: number | null;
-  placeholder: string;
-  onChange: (value: number | null) => void;
-}) {
-  return (
-    <Input
-      name={label}
-      label={label}
-      inputMode="numeric"
-      placeholder={placeholder}
-      value={value === null ? "" : String(value)}
-      onChange={(e) => {
-        const raw = e.target.value.trim();
-        // Boş kutuyu 0'a çevirmiyoruz: 0 geçerli bir kenar ve kullanıcı
-        // "sınır yok" demek isterken alanı sıfırdan başlatmış olurdu.
-        if (raw === "") return onChange(null);
-        // Türkçe klavyede ondalık ayırıcı virgül; noktaya çevirmezsek
-        // `Number` NaN döner ve girilen ölçü sessizce yok sayılırdı.
-        const parsed = Number(raw.replace(",", "."));
-        onChange(Number.isFinite(parsed) ? parsed : null);
-      }}
-    />
-  );
-}
-
-// --------------------------------------------------------------------------- //
-// Ekilebilir alan
-// --------------------------------------------------------------------------- //
-
-export function PlantingAreaSettings({ device }: { device: Device }) {
-  const queryClient = useQueryClient();
-  const stored = readMachineConfig(device.settings);
-  const [area, setArea, dirty] = useServerForm<PlantingArea>(stored.planting_area);
-
-  const save = useMutation({
-    mutationFn: () =>
-      api.devices.update(device.id, {
-        settings: { ...device.settings, planting_area: area },
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["device", device.id] });
-      toast.success("Ekim alanı güncellendi");
-    },
-    onError: (error) => toast.error("Kaydedilemedi", (error as Error).message),
-  });
-
-  return (
-    <Card>
-      <CardHeader
-        title="Ekim Alanı"
-        subtitle="Toprağın gerçekten başladığı yer"
-        icon={<SquareDashed className="size-4" />}
-      />
-
-      <p className="mb-4 rounded-xl bg-surface-2 p-3 text-xs leading-relaxed text-subtle">
-        Yatağın kenarıyla ekilebilir toprağın başladığı yer aynı değil: arada
-        profil, kablo kanalı ve saksı duvarı var. Şerit metreyle ölçüp buraya
-        girin — rastgele serpiştirme ve ekim yalnızca bu dikdörtgeni kullanır.
-        Boş bıraktığınız kenarda yatağın kendi ölçüsü geçerli olur.
-      </p>
-
-      <div className="grid grid-cols-2 gap-3">
-        <OptionalNumber
-          label="X başlangıcı"
-          value={area.x_min_mm}
-          placeholder="0"
-          onChange={(x_min_mm) => setArea({ ...area, x_min_mm })}
-        />
-        <OptionalNumber
-          label="X bitişi"
-          value={area.x_max_mm}
-          placeholder={String(device.bed_width_mm)}
-          onChange={(x_max_mm) => setArea({ ...area, x_max_mm })}
-        />
-        <OptionalNumber
-          label="Y başlangıcı"
-          value={area.y_min_mm}
-          placeholder="0"
-          onChange={(y_min_mm) => setArea({ ...area, y_min_mm })}
-        />
-        <OptionalNumber
-          label="Y bitişi"
-          value={area.y_max_mm}
-          placeholder={String(device.bed_length_mm)}
-          onChange={(y_max_mm) => setArea({ ...area, y_max_mm })}
-        />
-      </div>
-
-      <p className="mt-3 text-xs text-subtle">
-        Ekilebilir alan:{" "}
-        <span className="font-mono text-content">
-          {((area.x_max_mm ?? device.bed_width_mm) - (area.x_min_mm ?? 0)).toFixed(0)} ×{" "}
-          {((area.y_max_mm ?? device.bed_length_mm) - (area.y_min_mm ?? 0)).toFixed(0)} mm
-        </span>
-      </p>
-
-      <Button
-        variant="primary"
-        fullWidth
-        className="mt-4"
-        disabled={!dirty}
-        loading={save.isPending}
-        onClick={() => save.mutate()}
-      >
-        Kaydet
-      </Button>
-    </Card>
-  );
-}
 
 // --------------------------------------------------------------------------- //
 // Güvenli geçiş
@@ -257,8 +139,8 @@ export function SeederSettings({ device }: { device: Device }) {
   return (
     <Card>
       <CardHeader
-        title="Tohum Ekimi"
-        subtitle="Vakumlu uç ve tohum tepsisi"
+        title="Vakumlu Uç"
+        subtitle="Tohum tepsisi ve vakum donanımı"
         icon={<Sprout className="size-4" />}
       />
 
@@ -298,10 +180,26 @@ export function SeederSettings({ device }: { device: Device }) {
 
       <div className="mt-3 grid grid-cols-2 gap-2">
         {num("vacuum_pin", "Vakum pini")}
-        {num("default_depth_mm", "Varsayılan derinlik", " (mm)")}
+        {num("default_depth_mm", "Yedek derinlik", " (mm)")}
         {num("pick_dwell_ms", "Alma süresi", " (ms)")}
         {num("release_dwell_ms", "Bırakma süresi", " (ms)")}
       </div>
+
+      {/* Derinlik artık bitkinin kendi ayarı; buradaki yalnızca yedek.
+          Aynı sayıyı iki yerde tutmak, hangisinin geçerli olduğu sorusunu
+          doğururdu. */}
+      <p className="mt-2 text-xs leading-relaxed text-subtle">
+        <strong className="text-content">Yedek derinlik</strong> yalnızca bitkinin
+        kendi ekim derinliği tanımlı değilse kullanılıyor. Türe özel derinliği{" "}
+        <strong className="text-content">Bitki Kütüphanesi</strong>'nde, kartın
+        dişli düğmesinden ayarlıyorsunuz.
+      </p>
+
+      <p className="mt-2 text-xs leading-relaxed text-subtle">
+        Ekim alanı (ofset) artık <strong className="text-content">Tarla
+        Tasarımcısı</strong>'nda — sınırı tuvalde görerek ayarlamak, sayıyı
+        buradan girip sonucu görmemekten daha güvenilir.
+      </p>
 
       <p className="mt-3 text-xs leading-relaxed text-subtle">
         Bekleme süreleri sahada denenerek bulunur: vakumun tohumu tutması da

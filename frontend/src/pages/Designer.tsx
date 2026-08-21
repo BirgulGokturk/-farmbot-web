@@ -15,6 +15,7 @@ import {
   RotateCcw,
   Search,
   Sprout,
+  SquareDashed,
   Star,
   Trash2,
   Undo2,
@@ -47,8 +48,9 @@ import { formatDate } from "@/lib/format";
 import { growthAt } from "@/lib/growth";
 import { readMachineConfig } from "@/lib/machine";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
+import { useServerForm } from "@/hooks/useServerForm";
 import { useBotPosition } from "@/store/useBot";
-import type { PlantSpecies, PlantStage, Point } from "@/lib/types";
+import type { Device, PlantSpecies, PlantStage, Point } from "@/lib/types";
 
 // three.js ağır; yalnızca 3D moda geçilince indirilsin
 
@@ -667,6 +669,16 @@ export default function Designer() {
             </Card>
           )}
 
+          {device && (
+            <div className="mt-4">
+              <EkimAlaniPaneli device={device} />
+            </div>
+          )}
+
+          <div className="mt-4">
+            <PompaPaneli />
+          </div>
+
           <div className="mt-4">
             <SowPanel species={species ?? []} onDone={refreshPoints} />
           </div>
@@ -1048,6 +1060,279 @@ function PointInspector({
         </Button>
       </div>
     </Card>
+  );
+}
+
+/**
+ * Pompa ve çevre birimleri paneli.
+ *
+ * Neden tasarımcıda: sulama ve havalandırma kararı bahçeye bakarken
+ * veriliyor. Ayrı bir sayfaya gidip gelmek, "şu köşe kurumuş" ile "pompayı
+ * aç" arasına gereksiz bir adım koyuyordu.
+ *
+ * Birimler Ayarlar → Çevre Birimleri'nde tanımlanıyor; burada yalnızca
+ * anahtarları var. Tanımlama ve kullanım aynı yerde olsaydı, günlük kullanımda
+ * hiç dokunulmayacak alanlar sürekli göz önünde dururdu.
+ */
+function PompaPaneli() {
+  const deviceId = useDeviceId();
+  const [calisan, setCalisan] = useState<string | null>(null);
+  const [acik, setAcik] = useState<Record<string, boolean>>({});
+
+  const { data: peripherals } = useQuery({
+    queryKey: ["peripherals", deviceId],
+    queryFn: () => api.hardware.peripherals(deviceId!),
+    enabled: Boolean(deviceId),
+  });
+
+  async function cevir(birim: import("@/lib/types").Peripheral) {
+    if (!deviceId) return;
+    const yeni = !acik[birim.id];
+    setCalisan(birim.id);
+    try {
+      if (birim.kind === "servo") {
+        // Servo bir açı motoru; yüksek/alçak seviye anlamı taşımıyor
+        await api.control.setServo(
+          deviceId,
+          birim.pin,
+          yeni ? birim.servo_open_angle : birim.servo_closed_angle,
+        );
+      } else {
+        await api.control.writePin(deviceId, {
+          pin: birim.pin,
+          value: yeni ? 1 : 0,
+          mode: birim.mode,
+        });
+      }
+      setAcik((o) => ({ ...o, [birim.id]: yeni }));
+      toast.success(`${birim.label} ${yeni ? "açıldı" : "kapandı"}`);
+    } catch (error) {
+      toast.error("Komut gönderilemedi", (error as Error).message);
+    } finally {
+      setCalisan(null);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="Pompalar & Birimler"
+        subtitle="Su, hava, vana"
+        icon={<Droplets className="size-4" />}
+      />
+
+      {!peripherals?.length ? (
+        <div className="space-y-2 rounded-xl bg-surface-2 p-3 text-xs leading-relaxed text-subtle">
+          <p>Henüz tanımlı birim yok.</p>
+          <p>
+            <strong className="text-content">Ayarlar → Çevre Birimleri</strong>'nden
+            ad ve pin girerek ekleyin. Örneğin su pompası için pin 7, hava
+            pompası için pin 6.
+          </p>
+          <p className="text-warning">
+            Pompayı Arduino pinine doğrudan bağlamayın — pin yalnızca röleyi
+            anahtarlar, pompanın gücü ayrı kaynaktan gelmeli.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {peripherals.map((birim) => (
+            <button
+              key={birim.id}
+              type="button"
+              disabled={calisan === birim.id}
+              onClick={() => void cevir(birim)}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-soft",
+                acik[birim.id]
+                  ? "border-success/40 bg-success/10"
+                  : "border-line bg-surface-2 hover:border-brand/40",
+                calisan === birim.id && "opacity-60",
+              )}
+            >
+              <span className="text-xl">{birim.icon}</span>
+              <span className="min-w-0 flex-1 leading-tight">
+                <span className="block truncate text-sm font-medium text-content">
+                  {birim.label}
+                </span>
+                <span className="text-[0.7rem] text-subtle">
+                  pin {birim.pin} · {acik[birim.id] ? "açık" : "kapalı"}
+                </span>
+              </span>
+              <span
+                className={cn(
+                  "size-2.5 rounded-full",
+                  acik[birim.id] ? "bg-success" : "bg-subtle/40",
+                )}
+              />
+            </button>
+          ))}
+          {/* Durum panelde tutuluyor, robottan okunmuyor: Arduino pin
+              durumunu geri bildirmiyor. Robot yeniden başlarsa gösterge
+              gerçeği yansıtmayabilir — bu yüzden kalıcı bir kayıt gibi
+              sunmuyoruz. */}
+          <p className="pt-1 text-[0.7rem] leading-relaxed text-subtle">
+            Gösterge bu oturumda gönderilen son komuta göre; Arduino pin
+            durumunu geri bildirmiyor.
+          </p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Ekim alanı (ofset) paneli.
+ *
+ * Neden Ayarlar'da değil burada: alan tam olarak bu ekranda işe yarıyor.
+ * Kullanıcı tuvalde soluk kalan kenarları görüyor, sayıyı değiştiriyor,
+ * sınırın nereye kaydığını anında görüyor. Ayarlar sayfasına gidip gelmek
+ * bu geri bildirim döngüsünü kopartıyordu.
+ *
+ * "Robotun konumunu köşe yap" düğmeleri sahada ölçmenin en pratik yolu:
+ * robotu ekilebilir alanın köşesine sürüp okutuyorsunuz, şerit metre
+ * gerekmiyor.
+ */
+function EkimAlaniPaneli({ device }: { device: Device }) {
+  const queryClient = useQueryClient();
+  const position = useBotPosition();
+  const stored = readMachineConfig(device.settings).planting_area;
+  const [alan, setAlan, dirty] = useServerForm(stored);
+
+  const kaydet = useMutation({
+    mutationFn: () =>
+      api.devices.update(device.id, {
+        settings: { ...device.settings, planting_area: alan },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["device", device.id] });
+      void queryClient.invalidateQueries({ queryKey: ["devices"] });
+      toast.success("Ekim alanı güncellendi");
+    },
+    onError: (error) => toast.error("Kaydedilemedi", (error as Error).message),
+  });
+
+  const genislik = (alan.x_max_mm ?? device.bed_width_mm) - (alan.x_min_mm ?? 0);
+  const uzunluk = (alan.y_max_mm ?? device.bed_length_mm) - (alan.y_min_mm ?? 0);
+
+  return (
+    <Card>
+      <CardHeader
+        title="Ekim Alanı"
+        subtitle="Tarlanın ekilebilir kısmı"
+        icon={<SquareDashed className="size-4" />}
+      />
+
+      <p className="mb-3 text-xs leading-relaxed text-subtle">
+        Tarla baştan sona ekilmiyor: kenarda profil, kablo kanalı ve saksı
+        duvarı var. Buraya girdiğiniz dikdörtgen tuvalde çizili görünür ve
+        <strong> dışına bitki kaydedilemez</strong> — elle sürükleseniz de,
+        rastgele serpiştirseniz de.
+      </p>
+
+      <div className="grid grid-cols-2 gap-2">
+        <AlanKutusu
+          label="X başlangıcı"
+          value={alan.x_min_mm}
+          placeholder="0"
+          onChange={(x_min_mm) => setAlan({ ...alan, x_min_mm })}
+        />
+        <AlanKutusu
+          label="X bitişi"
+          value={alan.x_max_mm}
+          placeholder={String(device.bed_width_mm)}
+          onChange={(x_max_mm) => setAlan({ ...alan, x_max_mm })}
+        />
+        <AlanKutusu
+          label="Y başlangıcı"
+          value={alan.y_min_mm}
+          placeholder="0"
+          onChange={(y_min_mm) => setAlan({ ...alan, y_min_mm })}
+        />
+        <AlanKutusu
+          label="Y bitişi"
+          value={alan.y_max_mm}
+          placeholder={String(device.bed_length_mm)}
+          onChange={(y_max_mm) => setAlan({ ...alan, y_max_mm })}
+        />
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <Button
+          size="sm"
+          onClick={() =>
+            setAlan({
+              ...alan,
+              x_min_mm: Math.round(position.x),
+              y_min_mm: Math.round(position.y),
+            })
+          }
+        >
+          Robot = sol alt
+        </Button>
+        <Button
+          size="sm"
+          onClick={() =>
+            setAlan({
+              ...alan,
+              x_max_mm: Math.round(position.x),
+              y_max_mm: Math.round(position.y),
+            })
+          }
+        >
+          Robot = sağ üst
+        </Button>
+      </div>
+
+      <p className="mt-3 text-xs text-subtle">
+        Ekilebilir alan:{" "}
+        <span className="font-mono text-content">
+          {genislik.toFixed(0)} × {uzunluk.toFixed(0)} mm
+        </span>
+      </p>
+
+      <Button
+        variant="primary"
+        fullWidth
+        className="mt-3"
+        disabled={!dirty}
+        loading={kaydet.isPending}
+        onClick={() => kaydet.mutate()}
+      >
+        Kaydet
+      </Button>
+    </Card>
+  );
+}
+
+/** Boş bırakılabilen kenar: boş = yatağın kendi ölçüsü. */
+function AlanKutusu({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: number | null;
+  placeholder: string;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <Input
+      name={label}
+      label={label}
+      inputMode="decimal"
+      placeholder={placeholder}
+      value={value === null ? "" : String(value)}
+      onChange={(e) => {
+        const raw = e.target.value.trim();
+        // Boş kutu 0 değil "sınır yok" demek; 0 geçerli bir kenar
+        if (raw === "") return onChange(null);
+        // Türkçe klavyede ondalık ayırıcı virgül
+        const parsed = Number(raw.replace(",", "."));
+        onChange(Number.isFinite(parsed) ? parsed : null);
+      }}
+    />
   );
 }
 

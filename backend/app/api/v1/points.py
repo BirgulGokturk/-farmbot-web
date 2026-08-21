@@ -268,7 +268,7 @@ def _assert_in_bounds(device, x: float, y: float) -> None:
             detail=(
                 f"X koordinatı ekim alanının dışında "
                 f"({x_min:.0f}–{x_max:.0f} mm). "
-                "Alanı Ayarlar → Ekim Alanı'ndan değiştirebilirsiniz."
+                "Alanı Tarla Tasarımcısı → Ekim Alanı panelinden değiştirebilirsiniz."
             ),
         )
     if not (y_min <= y <= y_max):
@@ -277,6 +277,6 @@ def _assert_in_bounds(device, x: float, y: float) -> None:
             detail=(
                 f"Y koordinatı ekim alanının dışında "
                 f"({y_min:.0f}–{y_max:.0f} mm). "
-                "Alanı Ayarlar → Ekim Alanı'ndan değiştirebilirsiniz."
+                "Alanı Tarla Tasarımcısı → Ekim Alanı panelinden değiştirebilirsiniz."
             ),
         )

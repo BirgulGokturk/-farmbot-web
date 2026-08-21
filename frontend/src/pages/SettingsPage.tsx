@@ -15,7 +15,6 @@ import { toast } from "@/components/ui/toast";
 import { AgentSetup } from "@/components/settings/AgentSetup";
 import { Calibration } from "@/components/settings/Calibration";
 import {
-  PlantingAreaSettings,
   SeederSettings,
   TravelSettings,
 } from "@/components/settings/Planting";
@@ -47,7 +46,6 @@ export default function SettingsPage() {
         {device && <WorkspaceSettings device={device} />}
         {device && <Calibration device={device} />}
         {device && <TravelSettings device={device} />}
-        {device && <PlantingAreaSettings device={device} />}
         {device && <SeederSettings device={device} />}
         <AgentSetup />
         <HardwareSettings />
