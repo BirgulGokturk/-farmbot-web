@@ -110,6 +110,31 @@ export interface SeederConfig {
   default_depth_mm: number;
 }
 
+/**
+ * Bir bitki türü için cihaza özel ayar.
+ *
+ * Katalog küresel — tüm kullanıcılar aynı satırları paylaşıyor. "Benim
+ * çileğim 30 cm aralıkla" demek herkesin çileğini değiştiremez, o yüzden
+ * değişiklikler cihazın ayarlarında duruyor. `null` bırakılan alan katalog
+ * değerine düşüyor: kullanıcı yalnızca değiştirmek istediğini yazıyor ve
+ * katalog güncellenirse gerisi kendiliğinden güncel kalıyor.
+ */
+export interface SpeciesOverride {
+  favorite: boolean;
+  spread_mm: number | null;
+  sow_depth_mm: number | null;
+  water_ml_per_day: number | null;
+  days_to_harvest: number | null;
+}
+
+export const SPECIES_OVERRIDE_DEFAULTS: SpeciesOverride = {
+  favorite: false,
+  spread_mm: null,
+  sow_depth_mm: null,
+  water_ml_per_day: null,
+  days_to_harvest: null,
+};
+
 export interface MachineConfig {
   axes: Record<AxisName, AxisConfig>;
   /** Yumuşak sınırlar uygulansın mı? Kapalıyken hiçbir hedef reddedilmez. */
@@ -120,6 +145,8 @@ export interface MachineConfig {
   /** X/Y hareketinden önce uç güvenli yüksekliğe çekilsin mi? */
   travel_guard: boolean;
   seeder: SeederConfig;
+  /** Tür kısa adına göre cihaza özel ayarlar. */
+  species: Record<string, SpeciesOverride>;
 }
 
 export const SEEDER_DEFAULTS: SeederConfig = {
@@ -311,7 +338,41 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
       release_dwell_ms: num(rawSeeder.release_dwell_ms, SEEDER_DEFAULTS.release_dwell_ms),
       default_depth_mm: num(rawSeeder.default_depth_mm, SEEDER_DEFAULTS.default_depth_mm),
     },
+    species: readSpecies(source.species),
   };
+}
+
+function readSpecies(raw: unknown): Record<string, SpeciesOverride> {
+  const source = (raw ?? {}) as Record<string, unknown>;
+  const result: Record<string, SpeciesOverride> = {};
+  for (const [slug, veri] of Object.entries(source)) {
+    const o = (veri ?? {}) as Record<string, unknown>;
+    result[slug] = {
+      favorite: Boolean(o.favorite),
+      spread_mm: optionalNum(o.spread_mm),
+      sow_depth_mm: optionalNum(o.sow_depth_mm),
+      water_ml_per_day: optionalNum(o.water_ml_per_day),
+      days_to_harvest: optionalNum(o.days_to_harvest),
+    };
+  }
+  return result;
+}
+
+/**
+ * Katalog değeri ile kullanıcının değişikliğini birleştirir.
+ *
+ * Tek yerde: kart, tasarımcı ve ekim aynı sayıyı görsün. Ayrı ayrı
+ * hesaplansaydı biri katalogtan, diğeri ayardan okur ve panel kendi içinde
+ * çelişirdi.
+ */
+export function speciesValue<T extends keyof Omit<SpeciesOverride, "favorite">>(
+  overrides: Record<string, SpeciesOverride>,
+  slug: string,
+  key: T,
+  katalog: number,
+): number {
+  const deger = overrides[slug]?.[key];
+  return deger === null || deger === undefined ? katalog : deger;
 }
 
 /**

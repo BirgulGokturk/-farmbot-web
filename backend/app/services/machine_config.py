@@ -394,6 +394,46 @@ def planting_bounds(device: Any, settings: Any = None) -> tuple[float, float, fl
     return x_min, x_max, y_min, y_max
 
 
+# --------------------------------------------------------------------------- #
+# Bitki türü geçersiz kılmaları
+# --------------------------------------------------------------------------- #
+#
+# Katalog (`plant_species`) **küresel**: tüm kullanıcılar aynı satırları
+# paylaşıyor. Kullanıcının "benim çileğim 30 cm aralıkla" demesi, herkesin
+# çileğini değiştirmek anlamına gelemez.
+#
+# Bu yüzden değişiklikler cihazın kendi ayarlarında tutuluyor. Boş bırakılan
+# her alan katalog değerine düşüyor, yani kullanıcı yalnızca değiştirmek
+# istediğini yazıyor ve katalog güncellenirse gerisi kendiliğinden güncel
+# kalıyor.
+SPECIES_OVERRIDE_KEYS = {
+    "spread_mm": (1.0, 5000.0),
+    "sow_depth_mm": (0.0, 500.0),
+    "water_ml_per_day": (0.0, 100000.0),
+    "days_to_harvest": (1.0, 3650.0),
+}
+
+
+def normalize_species(raw: Any) -> dict[str, Any]:
+    """`{slug: {favorite, spread_mm, ...}}` — bilinmeyen alanlar atılır."""
+    source = raw if isinstance(raw, dict) else {}
+    result: dict[str, Any] = {}
+
+    for slug, veri in source.items():
+        if not isinstance(slug, str) or not isinstance(veri, dict):
+            continue
+        kayit: dict[str, Any] = {"favorite": bool(veri.get("favorite", False))}
+        for key, (alt, ust) in SPECIES_OVERRIDE_KEYS.items():
+            kayit[key] = _optional_number(veri.get(key), span=(alt, ust))
+
+        # Hiçbir şeyi değiştirmeyen kayıt saklanmasın: ayarlar dosyası her
+        # bakılan bitki için satır biriktirmesin.
+        if kayit["favorite"] or any(kayit[k] is not None for k in SPECIES_OVERRIDE_KEYS):
+            result[slug[:80]] = kayit
+
+    return result
+
+
 def normalize(settings: Any) -> dict[str, Any]:
     """`device.settings` sözlüğünü eksiksiz ve güvenli hâle getirir.
 
@@ -412,6 +452,7 @@ def normalize(settings: Any) -> dict[str, Any]:
     source["planting_area"] = normalize_planting_area(source.get("planting_area"))
     source["travel"] = normalize_travel(source.get("travel"))
     source["seeder"] = normalize_seeder(source.get("seeder"))
+    source["species"] = normalize_species(source.get("species"))
     return source
 
 

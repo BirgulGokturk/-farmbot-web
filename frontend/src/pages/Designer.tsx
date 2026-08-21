@@ -15,6 +15,7 @@ import {
   RotateCcw,
   Search,
   Sprout,
+  Star,
   Trash2,
   Undo2,
 } from "lucide-react";
@@ -85,6 +86,12 @@ export default function Designer() {
    * sınır aynı. Ayrı hesaplansalardı biri güncellenip diğeri kalırdı ve panel
    * "buraya ekebilirsin" deyip kaydı reddederdi.
    */
+  /** Türe özel ayarlar — yayılma çapı ve favori bilgisi buradan geliyor. */
+  const turAyarlari = useMemo(
+    () => readMachineConfig(device?.settings).species,
+    [device?.settings],
+  );
+
   const ekimAlani = useMemo(() => {
     if (!device) return null;
     const alan = readMachineConfig(device.settings).planting_area;
@@ -208,7 +215,10 @@ export default function Designer() {
         x,
         y,
         species_id: s.id,
-        radius_mm: s.spread_mm / 2,
+        // Kullanıcı kütüphaneden çapı değiştirdiyse o geçerli. Katalog
+        // değerini yazsaydık palette bir sayı görünüp bahçeye başkası
+        // ekilirdi — panel kendi içinde çelişirdi.
+        radius_mm: (turAyarlari[s.slug]?.spread_mm ?? s.spread_mm) / 2,
         depth_mm: s.sow_depth_mm,
       }),
     onSuccess: async (point) => {
@@ -366,12 +376,26 @@ export default function Designer() {
 
   const paletteDrag = usePaletteDrag({ onDrop: handleDrop, canDrop });
 
+  /**
+   * Palet sırası: **favoriler başta**.
+   *
+   * Katalogda 37 tür var ve kullanıcı pratikte bir avuç bitki ekiyor. Her
+   * seferinde aramak yerine kendi seçtikleri üstte duruyor; kütüphanedeki
+   * yıldız düğmesi bu listeyi belirliyor.
+   */
   const filteredSpecies = useMemo(() => {
     if (!species) return [];
     const query = search.trim().toLocaleLowerCase("tr");
-    if (!query) return species;
-    return species.filter((s) => s.name_tr.toLocaleLowerCase("tr").includes(query));
-  }, [species, search]);
+    const eslesen = query
+      ? species.filter((s) => s.name_tr.toLocaleLowerCase("tr").includes(query))
+      : species;
+
+    return [...eslesen].sort((a, b) => {
+      const fa = turAyarlari[a.slug]?.favorite ? 0 : 1;
+      const fb = turAyarlari[b.slug]?.favorite ? 0 : 1;
+      return fa - fb;
+    });
+  }, [species, search, turAyarlari]);
 
   const plantCount = points?.filter((p) => p.point_type === "plant").length ?? 0;
 
@@ -547,12 +571,19 @@ export default function Designer() {
                 )}
               >
                 <span className="text-xl">{item.icon}</span>
-                <span className="min-w-0 leading-tight">
+                <span className="min-w-0 flex-1 leading-tight">
                   <span className="block truncate text-sm font-medium text-content">
                     {item.name_tr}
                   </span>
-                  <span className="text-[0.7rem] text-subtle">{item.spread_mm} mm aralık</span>
+                  {/* Kullanıcı çapı değiştirdiyse onu göster: palette katalog
+                      değerini gösterip bahçeye başka çapla ekmek kafa karıştırırdı */}
+                  <span className="text-[0.7rem] text-subtle">
+                    {turAyarlari[item.slug]?.spread_mm ?? item.spread_mm} mm yayılma
+                  </span>
                 </span>
+                {turAyarlari[item.slug]?.favorite && (
+                  <Star className="size-3.5 shrink-0 fill-current text-warning" />
+                )}
               </button>
             ))}
             {!filteredSpecies.length && (
