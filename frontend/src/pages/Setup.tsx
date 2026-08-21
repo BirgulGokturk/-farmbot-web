@@ -39,7 +39,7 @@ import {
   Toggle,
 } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
-import { api } from "@/lib/api";
+import { API_BASE, api } from "@/lib/api";
 import { AXES, readMachineConfig, type AxisName } from "@/lib/machine";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
 import { useServerForm } from "@/hooks/useServerForm";
@@ -252,6 +252,27 @@ function DeviceStep({ device }: { device: Device }) {
   );
 }
 
+/**
+ * Ajanın bağlanacağı API adresi.
+ *
+ * Sabit yazılamaz: aynı panel hem bulutta hem Pi'de çalışıyor ve ajanın
+ * hangisine bağlanacağı buna göre değişiyor. Sabit bir bulut adresi, yerel
+ * kurulumda ajanı yanlış sunucuya yollardı — üstelik sessizce, çünkü bağlantı
+ * kurulur ama robot yerel panelde hiç görünmez.
+ *
+ * Bulutta: API başka bir konakta (`farmbot-api...`), o yüzden `API_BASE`
+ * kullanılıyor. Yerelde: API paneli sunan sunucunun kendisi ve ajan da aynı
+ * makinede, o yüzden `localhost` — makinenin adı ya da IP'si değişse bile
+ * bozulmaz.
+ */
+function ajanApiAdresi(): string {
+  if (/^https?:\/\//i.test(API_BASE)) {
+    return API_BASE.replace(/\/api\/v1\/?$/, "");
+  }
+  const port = window.location.port ? `:${window.location.port}` : "";
+  return `http://localhost${port}`;
+}
+
 /** 2. adım — Raspberry Pi köprüsünün token'ı ve kurulum komutları. */
 function AgentStep({
   deviceId,
@@ -391,9 +412,9 @@ sudo systemctl restart farmbot-agent`}
           <div>
             <p className="mb-1.5 text-sm font-medium text-content">Raspberry Pi'de çalıştırın</p>
             <pre className="overflow-x-auto rounded-xl bg-surface-2 p-3.5 font-mono text-xs leading-relaxed text-muted">
-{`sudo mkdir -p /etc/farmbot
-echo "FARMBOT_DEVICE_TOKEN=${token}" | sudo tee /etc/farmbot/agent.env > /dev/null
-sudo chmod 600 /etc/farmbot/agent.env
+{`mkdir -p ~/.config/farmbot
+echo "FARMBOT_DEVICE_TOKEN=${token}" > ~/.config/farmbot/agent.env
+chmod 600 ~/.config/farmbot/agent.env
 
 sudo tee /etc/systemd/system/farmbot-agent.service > /dev/null <<EOF
 [Unit]
@@ -408,8 +429,8 @@ WorkingDirectory=$HOME/farmbot-web/agent
 Environment=FARMBOT_SERIAL_PORT=/dev/ttyUSB0
 Environment=FARMBOT_BAUD=9600
 Environment=FARMBOT_GANTRY_URL=http://localhost:8091
-Environment=FARMBOT_API_URL=https://farmbot-api.onrender.com
-EnvironmentFile=-/etc/farmbot/agent.env
+Environment=FARMBOT_API_URL=${ajanApiAdresi()}
+EnvironmentFile=-$HOME/.config/farmbot/agent.env
 ExecStart=$HOME/farmbot-web/agent/.venv/bin/python farmbot_agent.py
 Restart=always
 RestartSec=5
@@ -433,6 +454,13 @@ journalctl -u farmbot-agent -n 20 --no-pager`}
               Token ayrı bir dosyada duruyor. İleride yenilerseniz yalnızca ilk
               iki satırı tekrar çalıştırıp servisi yeniden başlatmanız yeterli;
               birim dosyasına bir daha dokunmanız gerekmez.
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-subtle">
+              Dosya <code className="font-mono text-content">~/.config/farmbot/</code>{" "}
+              altında, yani <strong>ajanın kendi yazabildiği</strong> yerde.
+              Eşleştirme ve otomatik token yenileme de oraya yazıyor; ayrı bir
+              yol kullanmak, birimde iki farklı token dosyası bırakıp hangisinin
+              geçerli olduğunu belirsizleştirirdi.
             </p>
           </div>
         </div>
