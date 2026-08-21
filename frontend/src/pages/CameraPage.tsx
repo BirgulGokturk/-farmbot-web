@@ -85,7 +85,10 @@ export default function CameraPage() {
         <div className="p-5 pb-3">
           <CardHeader
             title="Canlı Akış"
-            subtitle={streamUrl ?? "Kamera adresi tanımlı değil"}
+            subtitle={
+              streamUrl ??
+              "Kurulmadı — fotoğraf çekmek için gerekmiyor"
+            }
             icon={<Video className="size-4" />}
             action={
               <div className="flex items-center gap-2">
@@ -105,6 +108,20 @@ export default function CameraPage() {
             className="mb-0"
           />
         </div>
+
+        {/*
+          Canlı akış ile fotoğraf çekmek **ayrı** işler. Akış ayrı bir video
+          sunucusu istiyor; fotoğraf ise ajan üzerinden çalışıyor ve hiçbir ek
+          kurulum gerektirmiyor. Bunu yazmazsak "Kapalı" rozeti kameranın hiç
+          bağlı olmadığı izlenimini veriyor.
+        */}
+        {!streamUrl && (
+          <p className="mx-5 mb-3 rounded-xl bg-surface-2 p-3 text-xs leading-relaxed text-subtle">
+            Canlı akış kurulmadı. <strong className="text-content">Fotoğraf Çek</strong>{" "}
+            bundan bağımsız çalışır: robot kareyi çekip konumuyla birlikte
+            yükler ve aşağıdaki galeride görünür.
+          </p>
+        )}
 
         <div className="mx-5 mb-5 aspect-video overflow-hidden rounded-xl border border-line bg-black">
           {streamUrl && streaming ? (
