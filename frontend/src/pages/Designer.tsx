@@ -44,6 +44,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { formatDate } from "@/lib/format";
 import { growthAt } from "@/lib/growth";
+import { readMachineConfig } from "@/lib/machine";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
 import { useBotPosition } from "@/store/useBot";
 import type { PlantSpecies, PlantStage, Point } from "@/lib/types";
@@ -75,6 +76,31 @@ export default function Designer() {
   const [heatmapOn, setHeatmapOn] = useState(false);
   const [heatSensorId, setHeatSensorId] = useState<string>("");
   const canvasRef = useRef<GardenCanvasHandle>(null);
+
+  /**
+   * Ekilebilir dikdörtgen.
+   *
+   * Kaynak tek: `device.settings.planting_area`. Sunucu da bitki kaydederken
+   * aynı değeri uyguluyor, yani tuvalde gördüğünüz sınır ile kabul edilen
+   * sınır aynı. Ayrı hesaplansalardı biri güncellenip diğeri kalırdı ve panel
+   * "buraya ekebilirsin" deyip kaydı reddederdi.
+   */
+  const ekimAlani = useMemo(() => {
+    if (!device) return null;
+    const alan = readMachineConfig(device.settings).planting_area;
+    const girilmis =
+      alan.x_min_mm !== null ||
+      alan.x_max_mm !== null ||
+      alan.y_min_mm !== null ||
+      alan.y_max_mm !== null;
+    if (!girilmis) return null;
+    return {
+      x1: alan.x_min_mm ?? 0,
+      y1: alan.y_min_mm ?? 0,
+      x2: alan.x_max_mm ?? device.bed_width_mm,
+      y2: alan.y_max_mm ?? device.bed_length_mm,
+    };
+  }, [device]);
 
   const viewDate = useMemo(() => {
     const date = new Date();
@@ -545,6 +571,7 @@ export default function Designer() {
               device={device}
               points={points ?? []}
               botPosition={botPosition}
+              ekimAlani={ekimAlani}
               selectedIds={selectedIds}
               onSelectionChange={setSelectedIds}
               onMovePoints={handleMovePoints}

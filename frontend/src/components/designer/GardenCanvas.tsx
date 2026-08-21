@@ -54,6 +54,8 @@ export interface GardenCanvasHandle {
 
 interface GardenCanvasProps {
   device: Device;
+  /** Ekilebilir dikdörtgen (mm). Verilmezse alan çizilmez. */
+  ekimAlani?: { x1: number; y1: number; x2: number; y2: number } | null;
   points: Point[];
   botPosition: Position;
   selectedIds: string[];
@@ -79,6 +81,7 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
   function GardenCanvas(
     {
       device,
+      ekimAlani,
       points,
       botPosition,
       selectedIds,
@@ -450,6 +453,60 @@ export const GardenCanvas = forwardRef<GardenCanvasHandle, GardenCanvasProps>(
               stroke="var(--border-strong)"
               strokeWidth={3 / view.scale}
             />
+
+            {/*
+              Ekilebilir alan.
+
+              Yatağın kenarıyla toprağın başladığı yer aynı değil; arada
+              profil ve kablo kanalı var. Dışarısını **soluklaştırıyoruz** ki
+              nereye ekilebileceği bir bakışta görünsün — sayı olarak girilen
+              ofsetin sahada neye denk geldiğini görmeden doğru ölçüldüğünden
+              emin olunamıyor.
+            */}
+            {ekimAlani && (
+              <g pointerEvents="none">
+                {/* Alan dışını karart: dört kenar ayrı dikdörtgen */}
+                {[
+                  { x: 0, y: 0, w: device.bed_width_mm, h: ekimAlani.y1 },
+                  {
+                    x: 0,
+                    y: ekimAlani.y2,
+                    w: device.bed_width_mm,
+                    h: device.bed_length_mm - ekimAlani.y2,
+                  },
+                  { x: 0, y: ekimAlani.y1, w: ekimAlani.x1, h: ekimAlani.y2 - ekimAlani.y1 },
+                  {
+                    x: ekimAlani.x2,
+                    y: ekimAlani.y1,
+                    w: device.bed_width_mm - ekimAlani.x2,
+                    h: ekimAlani.y2 - ekimAlani.y1,
+                  },
+                ].map((k, i) =>
+                  k.w > 0 && k.h > 0 ? (
+                    <rect
+                      key={i}
+                      x={k.x}
+                      y={k.y}
+                      width={k.w}
+                      height={k.h}
+                      fill="var(--surface)"
+                      fillOpacity="0.62"
+                    />
+                  ) : null,
+                )}
+                <rect
+                  x={ekimAlani.x1}
+                  y={ekimAlani.y1}
+                  width={ekimAlani.x2 - ekimAlani.x1}
+                  height={ekimAlani.y2 - ekimAlani.y1}
+                  fill="none"
+                  stroke="var(--warning)"
+                  strokeOpacity="0.85"
+                  strokeWidth={3 / view.scale}
+                  strokeDasharray={`${14 / view.scale} ${10 / view.scale}`}
+                />
+              </g>
+            )}
 
             {/* Isı haritası */}
             {heatmap && heatmap.length > 0 && (

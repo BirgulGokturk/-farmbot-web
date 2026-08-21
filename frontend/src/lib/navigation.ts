@@ -19,7 +19,6 @@ import {
   Workflow,
   Activity,
   Rocket,
-  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -73,29 +72,17 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Kontrol",
     items: [
       {
-        path: "/control",
-        label: "Manuel Kontrol",
-        icon: Gamepad2,
-        description: "Robotu elle sür, çevre birimlerini yönet",
-        primary: true,
-      },
-      {
         path: "/gantry",
         label: "Hareket Kontrolü",
         icon: Gamepad2,
-        description: "Gantry Studio — eksen sürme, ev arama, kalibrasyon",
+        description: "Eksen sürme, ev arama, uç değiştirme, kalibrasyon",
+        primary: true,
       },
       {
         path: "/sequences",
         label: "Diziler",
         icon: Workflow,
         description: "Yeniden kullanılabilir komut dizileri",
-      },
-      {
-        path: "/tool-zone",
-        label: "Uç Değiştirme",
-        icon: Wrench,
-        description: "Uç yuvalarının konumları ve güvenli yaklaşma",
       },
     ],
   },

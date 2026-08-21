@@ -49,7 +49,7 @@ export function MobileNav() {
 function shortLabel(label: string): string {
   const map: Record<string, string> = {
     "Kontrol Merkezi": "Merkez",
-    "Manuel Kontrol": "Kontrol",
+    "Hareket Kontrolü": "Hareket",
     "Tarla Tasarımcısı": "Tarla",
     "Sulama & Takvim": "Takvim",
   };

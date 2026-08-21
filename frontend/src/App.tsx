@@ -14,14 +14,12 @@ import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 
 // Ağır sayfalar ilk yüklemede indirilmesin
-const ManualControl = lazy(() => import("@/pages/ManualControl"));
 const GantryStudio = lazy(() => import("@/pages/GantryStudio"));
 const Designer = lazy(() => import("@/pages/Designer"));
 const Viewer3D = lazy(() => import("@/pages/Viewer3D"));
 const Sensors = lazy(() => import("@/pages/Sensors"));
 const CameraPage = lazy(() => import("@/pages/CameraPage"));
 const Sequences = lazy(() => import("@/pages/Sequences"));
-const ToolZone = lazy(() => import("@/pages/ToolZone"));
 const Plants = lazy(() => import("@/pages/Plants"));
 const Curves = lazy(() => import("@/pages/Curves"));
 const Schedule = lazy(() => import("@/pages/Schedule"));
@@ -129,10 +127,12 @@ export default function App() {
           <Route path="viewer" element={<Viewer3D />} />
           <Route path="camera" element={<CameraPage />} />
           <Route path="sensors" element={<Sensors />} />
-          <Route path="control" element={<ManualControl />} />
           <Route path="gantry" element={<GantryStudio />} />
+          {/* Eski adresler: jog ve uç değiştirme artık Gantry Studio
+              sekmesinde. Yer imi ya da eski bağlantı 404 görmesin. */}
+          <Route path="control" element={<Navigate to="/gantry" replace />} />
+          <Route path="tool-zone" element={<Navigate to="/gantry" replace />} />
           <Route path="sequences" element={<Sequences />} />
-          <Route path="tool-zone" element={<ToolZone />} />
           <Route path="designer" element={<Designer />} />
           <Route path="plants" element={<Plants />} />
           <Route path="curves" element={<Curves />} />

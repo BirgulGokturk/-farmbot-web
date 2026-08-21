@@ -248,12 +248,35 @@ async def _get_point(db: DbSession, device_id: uuid.UUID, point_id: uuid.UUID) -
 
 
 def _assert_in_bounds(device, x: float, y: float) -> None:
-    """Robotun ulaşamayacağı bir yere bitki koymayı baştan engelle."""
-    if not (0 <= x <= device.bed_width_mm):
+    """Bitkiyi **ekilebilir alanın** dışına koymayı baştan engelle.
+
+    Neden yatak ölçüsü değil de ekim alanı: yatağın kenarıyla toprağın
+    başladığı yer aynı değil — arada profil, kablo kanalı, saksı duvarı var.
+    Yatak ölçüsüne bakmak, tohumu toprağa değil metale bırakan bir plana
+    "geçerli" demek olurdu.
+
+    Kural tek yerde: `machine_config.planting_bounds`. Tasarımcıdan sürükleme,
+    koordinat düzenleme, toplu taşıma, rastgele serpiştirme ve ekim komutu —
+    hepsi buradan geçiyor. Ayrı ayrı yazılsalardı biri güncellenip diğeri
+    kalırdı ve panel kendi kuralına uymayan bir plan üretirdi.
+    """
+    x_min, x_max, y_min, y_max = machine_config.planting_bounds(device)
+
+    if not (x_min <= x <= x_max):
         raise HTTPException(
-            422, detail=f"X koordinatı 0–{device.bed_width_mm} mm aralığında olmalı"
+            422,
+            detail=(
+                f"X koordinatı ekim alanının dışında "
+                f"({x_min:.0f}–{x_max:.0f} mm). "
+                "Alanı Ayarlar → Ekim Alanı'ndan değiştirebilirsiniz."
+            ),
         )
-    if not (0 <= y <= device.bed_length_mm):
+    if not (y_min <= y <= y_max):
         raise HTTPException(
-            422, detail=f"Y koordinatı 0–{device.bed_length_mm} mm aralığında olmalı"
+            422,
+            detail=(
+                f"Y koordinatı ekim alanının dışında "
+                f"({y_min:.0f}–{y_max:.0f} mm). "
+                "Alanı Ayarlar → Ekim Alanı'ndan değiştirebilirsiniz."
+            ),
         )
