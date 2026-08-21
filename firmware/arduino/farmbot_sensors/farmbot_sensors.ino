@@ -48,6 +48,17 @@ Servo tarimServo;
 // Doğru eşiği bulmak için: panelde "Yağmur (ham)" grafiğine bak, sensör
 // kuruyken ve üstüne birkaç damla su damlattığında okunan değerlerin
 // ortasını buraya yaz.
+/*
+ * Yağmur eşiği — ham ADC değeri bunun ALTINDAYSA "ıslak" sayılıyor.
+ *
+ * Sahada doğrulanmadan kullanılamaz: 600 bir tahmindi ve elimizdeki sensör
+ * kuruyken 336–495 arası okuyordu, yani panel sürekli "yağmur var" diyor ve
+ * Arduino boşuna vanayı açıyordu.
+ *
+ * Doğru değeri bulmak için sensörü kuruyken ve ıslakken okuyup ortasını alın.
+ * `ESIK <sayi>` komutuyla çalışırken değiştirilebiliyor; her denemede eskizi
+ * yeniden yüklemek gerekmiyor.
+ */
 int suEsikDegeri = 600;
 
 // --- TOPRAK NEMİ (sensör takıldığında) ---
@@ -214,6 +225,9 @@ void paneleGonder(float nem, float dhtSic, float bmpSic,
   // Ham değer de gidiyor: eşiği panelden bakarak ayarlayabilmek için
   Serial.print(",\"hw103_rain_raw\":");  Serial.print(yagmurHam);
   Serial.print(",\"servo_aci\":");       Serial.print(servoAcisi);
+  // Eşiği de gönderiyoruz: panelde ham değerin yanında hangi sınıra göre
+  // karar verildiği görünsün, tahmin etmek gerekmesin
+  Serial.print(",\"rain_threshold\":");  Serial.print(suEsikDegeri);
 
   Serial.println("}");
 }
@@ -269,6 +283,21 @@ void komutlariIsle() {
       cevapVer(true, "pin");
     } else {
       cevapVer(false, "pin-eksik-parametre");
+    }
+
+  } else if (satir.startsWith("ESIK")) {
+    // "ESIK 250" -> yağmur eşiğini değiştir.
+    //
+    // Çalışırken ayarlanabilmesi önemli: doğru eşik ancak sensörü kuruyken ve
+    // ıslakken okuyarak bulunuyor ve her denemede eskizi yeniden yüklemek
+    // saatler alıyordu.
+    int bosluk = satir.indexOf(' ');
+    int yeni = (bosluk > 0) ? satir.substring(bosluk + 1).toInt() : -1;
+    if (yeni > 0 && yeni < 1024) {
+      suEsikDegeri = yeni;
+      cevapVer(true, "esik");
+    } else {
+      cevapVer(false, "esik-gecersiz");
     }
 
   } else if (satir == "OKU") {

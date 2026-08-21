@@ -47,6 +47,12 @@ KNOWN_CHANNELS: dict[str, ChannelSpec] = {
     "hw103_rain_raw": ChannelSpec(
         "Yağmur (ham ADC)", SensorKind.GENERIC, "", "📶", 0, 1023
     ),
+    # Kararın hangi sınıra göre verildiği. Ham değerin yanında durması gerekiyor:
+    # sahada eşiğin yanlış olduğunu ancak ikisini yan yana görünce fark ettik
+    # (sensör kuruyken 336–495 okuyor, eşik 600'dü, panel sürekli "yağmur" diyordu).
+    "rain_threshold": ChannelSpec(
+        "Yağmur eşiği", SensorKind.GENERIC, "", "🎚️", 0, 1023
+    ),
     # Ham ADC değeri — yüzde değil. Kalibrasyon (SOIL_DRY / SOIL_WET) bunu
     # izleyerek yapılır, bu yüzden ayrı kanal olarak tutuluyor.
     "hw103_soil_raw": ChannelSpec(
