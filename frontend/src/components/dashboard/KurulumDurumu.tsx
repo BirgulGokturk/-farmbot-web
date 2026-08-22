@@ -84,6 +84,14 @@ export function KurulumDurumu({
       yol: "/settings",
     },
     {
+      // Yuva tanımlı değilse ekim ucu almadan tohumluğa gider ve vakum boşa
+      // çalışır. Komut hata vermediği için ancak sahada fark edilir.
+      ad: "Tohum ucu yuvası",
+      tamam: config.tool_zone.slots.some((y) => y.role === "seeder"),
+      aciklama: "Yuva atanmadı; ekim, vakum ucunu almadan başlar.",
+      yol: "/settings",
+    },
+    {
       ad: "Güvenli geçiş",
       tamam: config.travel_guard && device.safe_height_mm !== 0,
       aciklama: "Yükseklik girilmedi; uç yatay harekette kaldırılmıyor.",

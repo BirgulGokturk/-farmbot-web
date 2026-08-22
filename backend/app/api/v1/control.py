@@ -213,7 +213,17 @@ async def water_point(
     hava = await _pompa_bul(db, device.id, PeripheralRole.AIR_PUMP)
     vana = await _pompa_bul(db, device.id, PeripheralRole.VALVE)
 
-    body = commands.sulama_recetesi(
+    # Sulama ucunu takıyoruz. Yuva tanımlı değilse bu adım atlanıyor —
+    # tek uçlu bir makinede uç değiştirme diye bir şey yok.
+    zone = machine_config.normalize(device.settings)["tool_zone"]
+    hazirlik = commands.uc_hazirla(
+        _yuva_bul(zone, "waterer"),
+        _takili_yuva(zone),
+        zone,
+        int(zone.get("change_speed", 20)),
+    )
+
+    body = hazirlik + commands.sulama_recetesi(
         x=point.x,
         y=point.y,
         soil_z=device.soil_height_mm,
@@ -239,6 +249,24 @@ async def water_point(
 
     # Sulama uzun sürer; yanıtı bekleme, ilerleme WebSocket'ten izlenir
     return await _dispatch(device, body, wait=False)
+
+
+def _yuva_bul(zone: dict, gorev: str) -> dict | None:
+    """Belirtilen görevdeki uç yuvası."""
+    for yuva in zone.get("slots") or []:
+        if yuva.get("role") == gorev:
+            return yuva
+    return None
+
+
+def _takili_yuva(zone: dict) -> dict | None:
+    ad = zone.get("current_tool")
+    if not ad:
+        return None
+    for yuva in zone.get("slots") or []:
+        if yuva.get("name") == ad:
+            return yuva
+    return None
 
 
 async def _pompa_bul(
@@ -347,8 +375,25 @@ async def sow_points(
             ),
         )
 
+    # Vakum kaynağı: kullanıcının tanımladığı birim. Sahada hava pompası
+    # vakumu üretiyor, o yüzden "vakum" görevi yoksa hava pompasına düşüyoruz.
+    # Ayarlardaki sabit pin son çare: birim tanımlıysa o geçerli.
+    vakum = await _pompa_bul(db, device.id, PeripheralRole.VACUUM) or await _pompa_bul(
+        db, device.id, PeripheralRole.AIR_PUMP
+    )
+    vakum_pin = vakum.pin if vakum else seeder["vacuum_pin"]
+
+    zone = machine_config.normalize(device.settings)["tool_zone"]
+    hazirlik = commands.uc_hazirla(
+        _yuva_bul(zone, "seeder"),
+        _takili_yuva(zone),
+        zone,
+        int(zone.get("change_speed", 20)),
+    )
+
     tray = (seeder["tray_x_mm"], seeder["tray_y_mm"], seeder["tray_z_mm"])
-    body: list[dict] = []
+    # Uç bir kez alınıyor, sonra bütün tohumlar aynı uçla ekiliyor
+    body: list[dict] = list(hazirlik)
     for point in points:
         # Derinlik önceliği: bitkiye özel > türün katalog değeri > ayarlardaki
         depth = point.depth_mm
@@ -364,7 +409,7 @@ async def sow_points(
                 soil_z=device.soil_height_mm,
                 depth_mm=float(depth),
                 tray=tray,
-                vacuum_pin=seeder["vacuum_pin"],
+                vacuum_pin=vakum_pin,
                 pick_dwell_ms=seeder["pick_dwell_ms"],
                 release_dwell_ms=seeder["release_dwell_ms"],
                 speed=payload.speed,

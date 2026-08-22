@@ -20,6 +20,7 @@ import {
   TravelSettings,
 } from "@/components/settings/Planting";
 import { IrrigationSettings } from "@/components/settings/Sulama";
+import { UcYuvalari } from "@/components/settings/UcYuvalari";
 import { AlertRules } from "@/components/settings/AlertRules";
 import { InstallApp } from "@/components/settings/InstallApp";
 import { api } from "@/lib/api";
@@ -48,6 +49,7 @@ export default function SettingsPage() {
         {device && <WorkspaceSettings device={device} />}
         {device && <Calibration device={device} />}
         {device && <TravelSettings device={device} />}
+        {device && <UcYuvalari device={device} />}
         {device && <IrrigationSettings device={device} />}
         {device && <SeederSettings device={device} />}
         <AgentSetup />

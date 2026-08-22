@@ -25,11 +25,15 @@ export interface AxisConfig {
   accel: number | null;
 }
 
+/** Uç yuvasının görevi — ekim ve sulama doğru ucu buna bakarak buluyor. */
+export type ToolRole = "none" | "seeder" | "waterer" | "soil_probe";
+
 export interface ToolSlot {
   name: string;
   x: number;
   y: number;
   z: number;
+  role: ToolRole;
 }
 
 /** Yasaklı kutu — hedefi içine düşen hareket, koşul doğru değilse engellenir. */
@@ -323,7 +327,19 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
             const slot = (item ?? {}) as Record<string, unknown>;
             const name = String(slot.name ?? "").trim();
             return name
-              ? [{ name, x: num(slot.x, 0), y: num(slot.y, 0), z: num(slot.z, 0) }]
+              ? [
+                  {
+                    name,
+                    x: num(slot.x, 0),
+                    y: num(slot.y, 0),
+                    z: num(slot.z, 0),
+                    role: (["seeder", "waterer", "soil_probe"] as const).includes(
+                      slot.role as never,
+                    )
+                      ? (slot.role as ToolRole)
+                      : "none",
+                  },
+                ]
               : [];
           })
         : [],

@@ -58,6 +58,11 @@ AXIS_DEFAULTS: dict[str, Any] = {
 #   ① Travel Z'ye çık → ② yaklaşma noktası üzerine yatayda git → ③ ucun
 #   yanında alçal → ④ altına kay (tek eksen) → ⑤ kilitle → ⑥ Lift kadar kaldır
 # Bırakma bunun tersi.
+# Uç yuvasının görevi. Ekim ve sulama komutları doğru ucu bulmak için buna
+# bakıyor; yuvanın adına bakıp tahmin etmek kullanıcının adlandırmasına
+# bağımlı olurdu ("Tohum ucu" mu "vakum" mu "seeder" mı?).
+TOOL_ROLES = ("none", "seeder", "waterer", "soil_probe")
+
 TOOL_ZONE_DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "safe_z": 0.0,           # jog korumasının istediği asgari yükseklik
@@ -269,12 +274,21 @@ def normalize_tool_zone(raw: Any) -> dict[str, Any]:
         name = str(item.get("name") or "").strip()
         if not name:
             continue
+        # Görev: bu yuvadaki uç ne işe yarıyor. Ekim komutu "tohum ucu
+        # hangisi" diye buna bakıyor; ad üzerinden tahmin etmek ("içinde
+        # 'tohum' geçiyorsa odur") kullanıcının adlandırmasına bağımlı
+        # ve kırılgan olurdu.
+        gorev = str(item.get("role") or "none").strip().lower()
+        if gorev not in TOOL_ROLES:
+            gorev = "none"
+
         slots.append(
             {
                 "name": name[:60],
                 "x": _number(item.get("x"), 0.0),
                 "y": _number(item.get("y"), 0.0),
                 "z": _number(item.get("z"), 0.0),
+                "role": gorev,
             }
         )
 
