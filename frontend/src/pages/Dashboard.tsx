@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
 import { GardenMiniMap } from "@/components/dashboard/GardenMiniMap";
+import { KurulumDurumu } from "@/components/dashboard/KurulumDurumu";
 import { api } from "@/lib/api";
 import { formatDateTime, formatRelative, formatUptime, wifiPercent } from "@/lib/format";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
@@ -106,6 +107,13 @@ export default function Dashboard() {
     .sort((a, b) => (a.next_run_at! < b.next_run_at! ? -1 : 1))
     .slice(0, 4);
 
+  // Kurulum şeridi su pompasının tanımlı olup olmadığına bakıyor
+  const { data: peripherals } = useQuery({
+    queryKey: ["peripherals", deviceId],
+    queryFn: () => api.hardware.peripherals(deviceId!),
+    enabled: Boolean(deviceId),
+  });
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -114,6 +122,9 @@ export default function Dashboard() {
         icon={<Gauge className="size-5" />}
         actions={<QuickActions />}
       />
+
+      {/* Ne eksik — hepsi tamamsa kendini gizliyor */}
+      <KurulumDurumu device={device} peripherals={peripherals} />
 
       {/* Özet metrikler */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

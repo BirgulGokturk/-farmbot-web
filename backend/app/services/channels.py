@@ -58,6 +58,9 @@ KNOWN_CHANNELS: dict[str, ChannelSpec] = {
     # Kararın hangi sınıra göre verildiği. Ham değerin yanında durması gerekiyor:
     # sahada eşiğin yanlış olduğunu ancak ikisini yan yana görünce fark ettik
     # (sensör kuruyken 336–495 okuyor, eşik 600'dü, panel sürekli "yağmur" diyordu).
+    # Pompa durumları — kartın bildirdiği gerçek durum, panelin tahmini değil
+    "pompa_su": ChannelSpec("Su pompası", SensorKind.GENERIC, "", "💧", 0, 1),
+    "pompa_hava": ChannelSpec("Hava pompası", SensorKind.GENERIC, "", "💨", 0, 1),
     "rain_threshold": ChannelSpec(
         "Yağmur eşiği", SensorKind.GENERIC, "", "🎚️", 0, 1023
     , diagnostic=True),

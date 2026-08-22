@@ -39,6 +39,13 @@ export default function Logs() {
   const deviceId = useDeviceId();
   const queryClient = useQueryClient();
   const liveLogs = useBot((s) => s.logs);
+  /*
+    Robotun bağlı olup olmadığı: durum ağacı geliyorsa ajan yayın yapıyor
+    demek. `connected` bayrağı tarayıcı-sunucu bağlantısını anlatıyor, robotu
+    değil — ikisini karıştırmak "bağlı değil" derken bağlı olan bir robota
+    bakmaya yol açardı.
+  */
+  const cevrimici = useBot((s) => s.status !== null);
 
   const [level, setLevel] = useState<LogLevel | "">("");
   const [search, setSearch] = useState("");
@@ -172,8 +179,17 @@ export default function Logs() {
         ) : (
           <EmptyState
             icon={<ScrollText className="size-6" />}
-            title="Kayıt bulunamadı"
-            description="Robot bağlandığında olaylar buraya anlık olarak düşecek."
+            /*
+              "Bağlı değil" ile "bağlı ama olay yok" ayrı şeyler.
+              Eski metin robot bağlıyken bile "robot bağlandığında…" diyordu ve
+              bağlantı sorunu varmış izlenimi veriyordu.
+            */
+            title={cevrimici ? "Henüz olay yok" : "Robot bağlı değil"}
+            description={
+              cevrimici
+                ? "Sulama, ekim, acil durdurma gibi olaylar gerçekleştikçe buraya düşecek. Jog hareketleri kaydedilmiyor."
+                : "Ajan bağlandığında olaylar buraya anlık olarak düşecek."
+            }
           />
         )}
       </Card>

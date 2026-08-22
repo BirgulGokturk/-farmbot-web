@@ -38,6 +38,7 @@ from app.core.security import hash_password, verify_password
 from app.db.session import SessionLocal, get_db
 from app.core.config import settings
 from app.models import Device, Image, Sensor, SensorReading
+from app.models.enums import LogLevel
 from app.schemas.agent import (
     AgentIngestRequest,
     AgentIngestResult,
@@ -50,7 +51,7 @@ from app.schemas.agent import (
     PairingCodeResponse,
 )
 from app.api.v1.telemetry import PHOTO_RETENTION
-from app.services import machine_config
+from app.services import gunluk, machine_config
 from app.services.agents import agent_hub
 from app.services.realtime import hub
 
@@ -346,6 +347,8 @@ async def ingest_readings(
             await db.flush()
             sensors[item.channel] = sensor
             created_channels.append(item.channel)
+        else:
+            _etiketi_tazele(sensor)
 
         db.add(
             SensorReading(
@@ -449,6 +452,39 @@ def _agent_config(device: Device, machine: dict) -> dict:
             ),
         },
     }
+
+
+def _etiketi_tazele(sensor: Sensor) -> None:
+    """Kanal kataloğa sonradan eklendiyse etiketi düzeltir.
+
+    Sensör kaydı ilk ölçüm geldiğinde oluşuyor ve etiketi o anki bilgiyle
+    yazılıyor. Kanal o sırada tanınmıyorsa adından bir etiket üretiliyor —
+    `rain_threshold` için "Rain Threshold" gibi, İngilizce ve Türkçe arayüzde
+    yabancı duran bir metin.
+
+    Sonradan kataloğa düzgün bir tanım eklendiğinde eski kayıt kendiliğinden
+    düzelmiyordu; kullanıcı panelde hâlâ eski adı görüyordu. Burada yalnızca
+    **kullanıcı elle değiştirmediyse** güncelliyoruz: kendi verdiği adı
+    ezmek, düzeltmekten daha kötü olurdu.
+    """
+    from app.services.channels import KNOWN_CHANNELS, describe_channel
+
+    if sensor.channel not in KNOWN_CHANNELS:
+        return
+
+    spec = KNOWN_CHANNELS[sensor.channel]
+    if sensor.label == spec.label:
+        return
+
+    # Etiket hâlâ otomatik üretilen hâlindeyse kullanıcı ona dokunmamış demek
+    otomatik = describe_channel(sensor.channel)
+    uretilmis = sensor.channel.replace("_", " ").title()
+    if sensor.label not in (uretilmis, otomatik.label):
+        return
+
+    sensor.label = spec.label
+    sensor.unit = spec.unit
+    sensor.icon = spec.icon
 
 
 def _auto_create_sensor(device_id: uuid.UUID, channel: str) -> Sensor:
@@ -589,6 +625,9 @@ async def agent_socket(websocket: WebSocket, token: str | None = None) -> None:
         # alanlarını geçersizleştiriyor ve oturum dışında okumak
         # DetachedInstanceError veriyor — her ajan bağlantısını kırardı.
         agent_config = _agent_config(device, machine)
+        await gunluk.yaz(
+            session, device, "Köprü ajanı bağlandı", level=LogLevel.SUCCESS
+        )
         await session.commit()
 
     _last_touch[device_id] = monotonic()

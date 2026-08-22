@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app.api.deps import DbSession, OwnedDevice, ensure_unlocked
 from app.db.base import utcnow
 from app.models import Device, Peripheral, Point, Sensor, Tool
-from app.models.enums import PeripheralRole, PlantStage, PointType
+from app.models.enums import LogLevel, PeripheralRole, PlantStage, PointType
 from app.schemas.control import (
     CommandResponse,
     ExecuteSequenceRequest,
@@ -30,7 +30,7 @@ from app.schemas.control import (
     SurveyRequest,
     WaterPointRequest,
 )
-from app.services import commands, gateway, machine_config
+from app.services import commands, gateway, gunluk, machine_config
 from app.services.mqtt import RpcError, RpcTimeoutError
 
 router = APIRouter(prefix="/devices/{device_id}/control", tags=["Kontrol"])
@@ -203,6 +203,19 @@ async def water_point(
         speed=payload.speed,
         safe_z=device.safe_height_mm,
     )
+    await gunluk.yaz(
+        db,
+        device,
+        gunluk.ozet(
+            "Sulama başladı",
+            bitki=point.name,
+            süre=f"{duration_ms / 1000:.0f} sn",
+            pin=pump_pin,
+        ),
+        level=LogLevel.SUCCESS,
+        commit=True,
+    )
+
     # Sulama uzun sürer; yanıtı bekleme, ilerleme WebSocket'ten izlenir
     return await _dispatch(device, body, wait=False)
 
@@ -342,6 +355,14 @@ async def sow_points(
             point.planted_at = planted_at
         await db.commit()
 
+    await gunluk.yaz(
+        db,
+        device,
+        gunluk.ozet("Tohum ekimi başladı", adet=len(points), hız=f"{payload.speed}"),
+        level=LogLevel.SUCCESS,
+        commit=True,
+    )
+
     response = await _dispatch(device, body, wait=False)
     response.detail = f"{len(points)} tohum ekim sırasına alındı"
     return response
@@ -360,6 +381,9 @@ async def take_photo(device: OwnedDevice) -> CommandResponse:
 async def emergency_lock(device: OwnedDevice, db: DbSession) -> CommandResponse:
     """ACİL DURDURMA. En yüksek öncelikle gider ve yanıt beklenmez."""
     device.is_locked = True
+    await gunluk.yaz(
+        db, device, "ACİL DURDURMA — tüm hareket kesildi", level=LogLevel.ERROR
+    )
     await db.commit()
     return await _dispatch(
         device,
@@ -372,6 +396,7 @@ async def emergency_lock(device: OwnedDevice, db: DbSession) -> CommandResponse:
 @router.post("/emergency-unlock", response_model=CommandResponse)
 async def emergency_unlock(device: OwnedDevice, db: DbSession) -> CommandResponse:
     device.is_locked = False
+    await gunluk.yaz(db, device, "Acil kilit açıldı", level=LogLevel.WARN)
     await db.commit()
     return await _dispatch(
         device,

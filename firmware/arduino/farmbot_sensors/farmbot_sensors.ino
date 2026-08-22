@@ -77,6 +77,33 @@ int suEsikDegeri = 393;
 const int ESIK_HISTEREZIS = 40;
 bool islakMi = false;
 
+/*
+ * POMPALAR
+ * --------
+ * D4 = hava pompası, D7 = su pompası.
+ *
+ * Pin pompayı **beslemiyor**, yalnızca röleyi anahtarlıyor: bir Arduino pini
+ * ~20 mA verir, en küçük pompa bile yüzlerce mA çeker. Pompanın gücü ayrı
+ * kaynaktan gelmeli.
+ *
+ * DİKKAT — röle yönü: piyasadaki modüllerin çoğu **aktif-LOW**, yani IN ucu
+ * LOW iken röle çeker. Öyle bir modülünüz varsa buradaki POMPA_ACIK/KAPALI
+ * değerlerini ters çevirin. Hangisi olduğunu denemeden bilmenin yolu yok;
+ * yanlış varsayım, açılışta pompanın kendiliğinden çalışması demek.
+ */
+#define POMPA_HAVA_PIN 4
+#define POMPA_SU_PIN   7
+
+const int POMPA_ACIK   = HIGH;
+const int POMPA_KAPALI = LOW;
+
+// Panelin gerçek durumu görebilmesi için son yazılan değeri saklıyoruz.
+// Arduino pinin çıkışını geri okuyamıyor; komutu biz verdiğimiz için
+// hatırlamak tek yol. Böylece panel "gönderdiğimi sanıyorum" yerine
+// "kartın bildirdiği" durumu gösteriyor.
+bool pompaHavaAcik = false;
+bool pompaSuAcik = false;
+
 // --- TOPRAK NEMİ (sensör takıldığında) ---
 // Kalibrasyon: probu havada tutunca okunan değer -> TOPRAK_KURU,
 // suya batırınca okunan -> TOPRAK_ISLAK. Panelde "Toprak (ham)" grafiğinden
@@ -110,6 +137,19 @@ void setup() {
   }
 
   // HW-103 için pinMode ayarına gerek yoktur, analogRead doğrudan okur.
+
+  /*
+   * Pompaları açıkça KAPALI başlat.
+   *
+   * Bu satırlar olmadan pinler açılışta giriş (yüksek empedans) kalıyor ve
+   * röle modülünün kendi davranışına bağlı olarak kısa süre çekebiliyor.
+   * Elektrik kesilip geldiğinde ya da kart resetlendiğinde suyun kendiliğinden
+   * akmaya başlaması kabul edilemez.
+   */
+  pinMode(POMPA_HAVA_PIN, OUTPUT);
+  digitalWrite(POMPA_HAVA_PIN, POMPA_KAPALI);
+  pinMode(POMPA_SU_PIN, OUTPUT);
+  digitalWrite(POMPA_SU_PIN, POMPA_KAPALI);
 
   Serial.println("Tum Sensorler Aktif. Olcumler Basliyor...");
   Serial.println("----------------------------------------");
@@ -251,6 +291,11 @@ void paneleGonder(float nem, float dhtSic, float bmpSic,
   // karar verildiği görünsün, tahmin etmek gerekmesin
   Serial.print(",\"rain_threshold\":");  Serial.print(suEsikDegeri);
 
+  // Pompa durumları. Panel bunları gösterince "gönderdiğimi sanıyorum" değil
+  // "kartın bildirdiği" durum görünüyor; robot resetlense de doğru kalıyor.
+  Serial.print(",\"pompa_hava\":");     Serial.print(pompaHavaAcik ? 1 : 0);
+  Serial.print(",\"pompa_su\":");       Serial.print(pompaSuAcik ? 1 : 0);
+
   Serial.println("}");
 }
 
@@ -301,7 +346,12 @@ void komutlariIsle() {
       int pin = satir.substring(bosluk1 + 1, bosluk2).toInt();
       int deger = satir.substring(bosluk2 + 1).toInt();
       pinMode(pin, OUTPUT);
-      digitalWrite(pin, deger ? HIGH : LOW);
+      digitalWrite(pin, deger ? POMPA_ACIK : POMPA_KAPALI);
+
+      // Pompa pinleriyse durumu hatırla ki panele doğrusu gitsin
+      if (pin == POMPA_HAVA_PIN) pompaHavaAcik = (deger != 0);
+      if (pin == POMPA_SU_PIN)   pompaSuAcik = (deger != 0);
+
       cevapVer(true, "pin");
     } else {
       cevapVer(false, "pin-eksik-parametre");
