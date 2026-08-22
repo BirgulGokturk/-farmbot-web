@@ -308,88 +308,54 @@ def sulama_recetesi(
 # Uç değiştirme
 # --------------------------------------------------------------------------- #
 #
-# Kural (PLC_BRIEF.md §7): kafa ucun **üstüne dikey inemez**, uca yandan ve
-# yalnızca tek eksen boyunca kayarak girer. Sıra:
+# Bu diziyi **biz kurmuyoruz**. Tek bir adım üretip Gantry Studio'ya
+# devrediyoruz; o da kendi `tool_change` yordamını çalıştırıyor.
 #
-#   ① Geçiş Z'ye çık → ② yaklaşma noktası üzerine yatayda git → ③ ucun yanında
-#   alçal → ④ altına kay (tek eksen) → ⑤ kilitle → ⑥ Lift kadar kaldır
+# Neden
+# -----
+# Önce kendimiz kuruyorduk: geçiş Z'ye çık, yaklaşma noktasına git, ucun
+# yanında alçal, altına kay, kilitle, kaldır. Aynı geometriyi iki yerde
+# hesaplamak demekti ve sahada beklenen şekilde kırıldı — yaklaşma noktası
+# eksen sınırının dışına düştü ("Y target -1.8 mm outside limits") ve komut
+# hiç başlamadan reddedildi.
 #
-# Bırakma bunun tersi. Geçiş Z en uzun uçtan yüksek olmalı; kafa yatayda o
-# yükseklikte gidiyor ve alçak kalırsa aradaki uçlara çarpar.
+# Gantry Studio bu işi zaten yapıyor ve sahada çalışan kısım orası: kayma
+# eksenini, yaklaşma ofsetini, geçiş yüksekliğini, kilitleme servosunu ve
+# **varlık sensörünü** biliyor. Varlık sensörü bizde hiç yoktu; ucun gerçekten
+# takılıp takılmadığını yalnızca o görüyor.
+#
+# Sonuç: geometri tek yerde duruyor, biz yalnızca "hangi uç" diyoruz.
 
 
-def _yaklasma(slot: dict[str, Any], zone: dict[str, Any]) -> tuple[float, float]:
-    """Kayma ekseni boyunca kaydırılmış yaklaşma noktası."""
-    offset = float(zone.get("approach_offset", 0.0))
-    if str(zone.get("slide_axis", "y")).lower() == "x":
-        return float(slot["x"]) + offset, float(slot["y"])
-    return float(slot["x"]), float(slot["y"]) + offset
+def tool_change(name: str) -> dict[str, Any]:
+    """Gantry Studio'ya "şu ucu tak" der.
 
-
-def uc_al(slot: dict[str, Any], zone: dict[str, Any], speed: int = 20) -> list[dict[str, Any]]:
-    """Yuvadaki ucu alır."""
-    travel_z = float(zone.get("travel_z", 0.0))
-    lift = float(zone.get("lift_mm", 0.0))
-    ax, ay = _yaklasma(slot, zone)
-    x, y, z = float(slot["x"]), float(slot["y"]), float(slot["z"])
-
-    adimlar = [
-        # ① Ucu olduğu yerde yukarı çek. X/Y'yi bilmediğimiz için hedefin
-        #    X/Y'sini veriyoruz; ajandaki koruma zaten önce Z'yi kaldırıyor.
-        move_absolute(ax, ay, travel_z, speed),
-        move_absolute(ax, ay, z, speed),      # ③ ucun yanında alçal
-        move_absolute(x, y, z, speed),        # ④ altına kay (tek eksen)
-    ]
-    # ⑤ Kilitleme servosu PLC yazmacıyla sürülüyor ve ajan PLC'ye yazmıyor;
-    #    yazmaç tanımlanana kadar bu adım üretilmiyor.
-    if zone.get("lock_delay_ms"):
-        adimlar.append(wait(int(zone["lock_delay_ms"])))
-    adimlar.append(move_absolute(x, y, z + lift, speed))  # ⑥ kaldır
-    return adimlar
-
-
-def uc_birak(slot: dict[str, Any], zone: dict[str, Any], speed: int = 20) -> list[dict[str, Any]]:
-    """Takılı ucu yuvasına bırakır — alma dizisinin tersi."""
-    travel_z = float(zone.get("travel_z", 0.0))
-    lift = float(zone.get("lift_mm", 0.0))
-    ax, ay = _yaklasma(slot, zone)
-    x, y, z = float(slot["x"]), float(slot["y"]), float(slot["z"])
-
-    adimlar = [
-        move_absolute(x, y, travel_z, speed),
-        move_absolute(x, y, z + lift, speed),
-        move_absolute(x, y, z, speed),
-    ]
-    if zone.get("lock_delay_ms"):
-        adimlar.append(wait(int(zone["lock_delay_ms"])))
-    adimlar.extend([
-        move_absolute(ax, ay, z, speed),        # yuvadan yana kay
-        move_absolute(ax, ay, travel_z, speed),  # yukarı çık
-    ])
-    return adimlar
+    Ajan bunu `/api/tool` çağrısına çeviriyor. Gerekiyorsa takılı uç önce
+    bırakılıyor; zaten doğru uç takılıysa Gantry Studio hiçbir şey yapmıyor.
+    """
+    return {"kind": "tool_change", "args": {"name": name}}
 
 
 def uc_hazirla(
     hedef: dict[str, Any] | None,
     takili: dict[str, Any] | None,
-    zone: dict[str, Any],
+    zone: dict[str, Any] | None = None,
     speed: int = 20,
 ) -> list[dict[str, Any]]:
     """Doğru ucun takılı olmasını sağlar.
 
     Zaten doğru uç takılıysa **hiç adım üretmiyor**: her sulamada ucu bırakıp
-    yeniden almak hem zaman kaybı hem gereksiz aşınma.
+    yeniden almak hem zaman kaybı hem gereksiz aşınma. Gantry Studio da aynı
+    kontrolü yapıyor ama boşuna bir tur ağa çıkmanın anlamı yok.
+
+    `zone` ve `speed` artık kullanılmıyor — geometri Gantry Studio'da. İmzada
+    duruyorlar ki çağıran taraflar tek tek değişmek zorunda kalmasın.
     """
     if hedef is None:
         return []
     if takili is not None and takili.get("name") == hedef.get("name"):
         return []
-
-    adimlar: list[dict[str, Any]] = []
-    if takili is not None:
-        adimlar.extend(uc_birak(takili, zone, speed))
-    adimlar.extend(uc_al(hedef, zone, speed))
-    return adimlar
+    return [tool_change(str(hedef["name"]))]
 
 
 def wait(milliseconds: int) -> dict[str, Any]:

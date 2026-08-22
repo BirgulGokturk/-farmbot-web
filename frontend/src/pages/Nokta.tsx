@@ -103,6 +103,8 @@ export default function Nokta() {
   const [derinlik, setDerinlik] = useState<number | null>(null);
   const [sure, setSure] = useState<number | null>(null);
   const [probDerinlik, setProbDerinlik] = useState<number | null>(null);
+  /** Son çalıştırmanın zamanı — ondan önceki ölçümler sonuç sayılmıyor. */
+  const [calistirmaAni, setCalistirmaAni] = useState<number | null>(null);
 
   const { data: sensors } = useQuery({
     queryKey: ["sensors", deviceId],
@@ -136,6 +138,7 @@ export default function Nokta() {
           ? { probe_depth_mm: probDerinlik }
           : {}),
       }),
+    onMutate: () => setCalistirmaAni(Date.now()),
     onSuccess: (yanit) => toast.success("Sıraya alındı", yanit.detail ?? undefined),
     onError: (error) => toast.error("Çalıştırılamadı", (error as Error).message),
   });
@@ -186,7 +189,15 @@ export default function Nokta() {
     );
   }
 
-  const olcum = toprakSensoru ? sonOlcumler[toprakSensoru.id] : undefined;
+  // Yayındaki son ölçüm, komutun **sonucu değil**. Kanallı sensör iki
+  // saniyede bir yayın yapıyor; robot hiç kıpırdamadan da bu kart dolu
+  // görünüyordu ve ölçüm alınmış gibi okunuyordu. Bu yüzden yalnızca
+  // çalıştırma anından **sonra** gelen ölçüm gösteriliyor.
+  const ham = toprakSensoru ? sonOlcumler[toprakSensoru.id] : undefined;
+  const olcum =
+    ham && calistirmaAni !== null && Date.parse(ham.read_at) >= calistirmaAni
+      ? ham
+      : undefined;
 
   return (
     <div className="space-y-6">
@@ -357,6 +368,7 @@ export default function Nokta() {
                 x,
                 y,
                 yuvaAdi: yuva?.label ?? null,
+                gantryAdi: yuva?.name ?? null,
                 takili: config.tool_zone.current_tool,
                 seeder: config.seeder,
                 derinlik: derinlik ?? config.seeder.default_depth_mm,
@@ -429,9 +441,15 @@ export default function Nokta() {
                     {new Date(olcum.read_at).toLocaleTimeString("tr-TR")}
                   </p>
                 </div>
+              ) : calistirmaAni !== null ? (
+                <p className="py-3 text-center text-sm text-subtle">
+                  Ölçüm bekleniyor… Robot noktaya varıp probu batırdıktan sonra
+                  gelen ilk değer buraya düşer.
+                </p>
               ) : (
                 <p className="py-3 text-center text-sm text-subtle">
-                  Henüz ölçüm gelmedi. Çalıştırdıktan sonra sonuç buraya düşer.
+                  Henüz çalıştırılmadı. Yayındaki anlık değer burada
+                  gösterilmiyor — yalnızca bu komutun sonucu.
                 </p>
               )}
             </Card>
@@ -449,6 +467,8 @@ interface OnizlemeGirdisi {
   x: number;
   y: number;
   yuvaAdi: string | null;
+  /** Gantry Studio'daki istasyon adı — komuta giden anahtar. */
+  gantryAdi: string | null;
   takili: string | null;
   seeder: { tray_x_mm: number; tray_y_mm: number; tray_z_mm: number; vacuum_pin: number };
   derinlik: number;
@@ -474,13 +494,15 @@ function onizleme(g: OnizlemeGirdisi): string[] {
   const nokta = `X${g.x} Y${g.y}`;
 
   if (g.yuvaAdi) {
-    if (g.takili && g.takili === g.yuvaAdi) {
-      adimlar.push(`${g.yuvaAdi} zaten takılı — uç alma atlanıyor`);
+    if (g.takili && g.takili === g.gantryAdi) {
+      adimlar.push(`${g.yuvaAdi} zaten takılı — uç değiştirme atlanıyor`);
     } else {
-      adimlar.push(`${g.yuvaAdi} yuvasına git ve ucu al (yandan yaklaşarak)`);
+      // Diziyi biz kurmuyoruz: yandan yaklaşma, kayma ekseni, kilitleme
+      // servosu ve varlık sensörü Gantry Studio'da.
+      adimlar.push(`Gantry Studio "${g.gantryAdi}" ucunu taksın (${g.yuvaAdi})`);
     }
   } else {
-    adimlar.push("uç alma yok — yuva görevi atanmamış");
+    adimlar.push("uç değiştirme yok — yuva görevi atanmamış");
   }
 
   if (g.is === "sow") {

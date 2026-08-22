@@ -106,3 +106,37 @@ class TestKanalliSensor:
         )
         assert adimlar[1]["args"]["location"]["args"]["z"] == -30
         assert adimlar[-1]["args"]["location"]["args"]["z"] == 100
+
+
+class TestUcHazirla:
+    """Uç değiştirme Gantry Studio'ya devredildi.
+
+    Diziyi kendimiz kuruyorduk ve aynı geometriyi iki yerde hesaplamak sahada
+    kırıldı: yaklaşma noktası eksen sınırının dışına düştü
+    ("Y target -1.8 mm outside limits") ve komut hiç başlamadan reddedildi.
+    Artık tek adım üretip Gantry Studio'ya "şu ucu tak" diyoruz.
+    """
+
+    HEDEF = {"name": "tool2", "label": "Toprak Probu", "x": 40, "y": 18, "z": 150}
+
+    def test_tek_adim_uretiliyor(self) -> None:
+        adimlar = commands.uc_hazirla(self.HEDEF, None, {})
+        assert adimlar == [{"kind": "tool_change", "args": {"name": "tool2"}}]
+
+    def test_koordinat_uretilmiyor(self) -> None:
+        """Geometri Gantry Studio'da; buradan hareket komutu çıkmamalı."""
+        adimlar = commands.uc_hazirla(self.HEDEF, None, {"approach_offset": -20})
+        assert all(a["kind"] == "tool_change" for a in adimlar)
+
+    def test_dogru_uc_takiliysa_bos(self) -> None:
+        """Her işte ucu bırakıp yeniden almak zaman kaybı ve gereksiz aşınma."""
+        assert commands.uc_hazirla(self.HEDEF, {"name": "tool2"}, {}) == []
+
+    def test_baska_uc_takiliysa_degistiriliyor(self) -> None:
+        """Bırakma adımını da Gantry Studio üstleniyor — tek çağrı yetiyor."""
+        adimlar = commands.uc_hazirla(self.HEDEF, {"name": "tool1"}, {})
+        assert adimlar == [{"kind": "tool_change", "args": {"name": "tool2"}}]
+
+    def test_gorev_atanmamissa_bos(self) -> None:
+        """Tek uçlu makinede uç değiştirme diye bir şey yok."""
+        assert commands.uc_hazirla(None, {"name": "tool1"}, {}) == []

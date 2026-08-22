@@ -744,6 +744,18 @@ class Agent:
             await self._apply_motion(kind, args)
             return
 
+        if kind == "tool_change":
+            if self.gantry is None:
+                raise RuntimeError(
+                    "Uç değiştirme için hareket kontrolü gerekiyor. "
+                    "Ajanı --gantry adresiyle başlatın."
+                )
+            ad = str(args.get("name") or "")
+            logger.info("Uç değiştiriliyor: %s", ad)
+            sonuc = await self.gantry.tool_change(ad)
+            logger.info("Uç değiştirme sonucu: %s", sonuc)
+            return
+
         if kind == "take_photo":
             await self._take_photo()
             return

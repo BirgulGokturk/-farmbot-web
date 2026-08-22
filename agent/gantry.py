@@ -428,6 +428,42 @@ class GantryClient:
             raise GantryUnavailable(result.get("error") or "Hareket komutu reddedildi")
         return result
 
+    async def tool_change(self, name: str) -> str:
+        """Gantry Studio'nun kendi uç değiştirme yordamını çalıştırır.
+
+        Diziyi biz kurmuyoruz: yandan yaklaşma, kayma ekseni, kilitleme
+        servosu ve varlık sensörü orada. Aynı geometriyi ikinci kez hesaplamak,
+        iki tarafın birbirinden kayması demekti.
+
+        Uzun sürüyor — kafa geçiş yüksekliğine çıkıp yuvaya gidiyor, kilitleyip
+        kaldırıyor — bu yüzden hareket zaman aşımını kullanıyoruz.
+        """
+        try:
+            response = await self._http.post(
+                "/api/tool",
+                json={"action": "change", "name": name},
+                timeout=self._command_timeout,
+            )
+            response.raise_for_status()
+            result = response.json()
+        except httpx.TimeoutException as exc:
+            raise GantryUnavailable(
+                f"Uç değiştirme {self._command_timeout:.0f} saniyede tamamlanmadı."
+            ) from exc
+        except Exception as exc:
+            detail = str(exc) or type(exc).__name__
+            raise GantryUnavailable(
+                f"Hareket kontrolüne ulaşılamıyor ({detail}). "
+                "Raspberry Pi'de gantry-studio servisi çalışıyor mu?"
+            ) from exc
+
+        if not result.get("ok", False):
+            # "already holding X", "unknown tool", "presence sensor sees no
+            # tool" — hepsi Gantry Studio'nun kendi ifadesi, olduğu gibi
+            # aktarıyoruz; sahada anlamlı olan onun dili.
+            raise GantryUnavailable(result.get("msg") or "Uç değiştirme reddedildi")
+        return str(result.get("msg") or "ok")
+
     async def move_xyz(
         self,
         x: float,
