@@ -165,6 +165,10 @@ export interface GantryTools {
   slide_axis?: string;
   approach?: number | null;
   lift?: number | null;
+  /** 0 ya da boş = kilitleme servosu bağlı değil. */
+  lock_reg?: number | null;
+  /** 0 ya da boş = varlık sensörü bağlı değil. */
+  presence_reg?: number | null;
 }
 
 /** Ajanı bağlamak için panelde gösterilen kısa ömürlü kod. */

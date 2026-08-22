@@ -348,10 +348,28 @@ def uc_hazirla(
     yeniden almak hem zaman kaybı hem gereksiz aşınma. Gantry Studio da aynı
     kontrolü yapıyor ama boşuna bir tur ağa çıkmanın anlamı yok.
 
-    `zone` ve `speed` artık kullanılmıyor — geometri Gantry Studio'da. İmzada
-    duruyorlar ki çağıran taraflar tek tek değişmek zorunda kalmasın.
+    Kapalıyken hiçbir şey üretmiyor
+    ------------------------------
+    Uç değiştirme, kilitleme servosu (`lock_reg`) ve varlık sensörü
+    (`presence_reg`) Gantry Studio'da tanımlı olmadan **çalışmıyor ama
+    çalışmış gibi görünüyor**: Gantry Studio'nun kontrolü `read_presence() is
+    False` biçiminde ve sensör yokken `None` dönüyor, yani her deneme başarılı
+    sayılıp `current_tool` yazılıyor.
+
+    Sahadaki sonucu şu oldu: kafa yuvaların üstüne gidip iniyor, kayıyor,
+    kalkıyor — hiçbir şey takmadan. Sonraki komutta Gantry Studio "elimde
+    tool1 var" deyip önce onu bırakmaya gidiyor. Kullanıcı hedefe gitmesini
+    beklerken robot uç istasyonlarında dolaşıyor.
+
+    Bu yüzden anahtar varsayılan **kapalı**: donanım bağlanana kadar hiç
+    hareket üretmemek, işe yaramayan hareket üretmekten iyi.
+
+    `speed` artık kullanılmıyor — geometri Gantry Studio'da. İmzada duruyor ki
+    çağıran taraflar tek tek değişmek zorunda kalmasın.
     """
     if hedef is None:
+        return []
+    if not (zone or {}).get("enabled"):
         return []
     if takili is not None and takili.get("name") == hedef.get("name"):
         return []

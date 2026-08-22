@@ -118,25 +118,38 @@ class TestUcHazirla:
     """
 
     HEDEF = {"name": "tool2", "label": "Toprak Probu", "x": 40, "y": 18, "z": 150}
+    ACIK = {"enabled": True}
 
     def test_tek_adim_uretiliyor(self) -> None:
-        adimlar = commands.uc_hazirla(self.HEDEF, None, {})
+        adimlar = commands.uc_hazirla(self.HEDEF, None, self.ACIK)
         assert adimlar == [{"kind": "tool_change", "args": {"name": "tool2"}}]
 
     def test_koordinat_uretilmiyor(self) -> None:
         """Geometri Gantry Studio'da; buradan hareket komutu çıkmamalı."""
-        adimlar = commands.uc_hazirla(self.HEDEF, None, {"approach_offset": -20})
+        adimlar = commands.uc_hazirla(self.HEDEF, None, {**self.ACIK, "approach_offset": -20})
         assert all(a["kind"] == "tool_change" for a in adimlar)
 
     def test_dogru_uc_takiliysa_bos(self) -> None:
         """Her işte ucu bırakıp yeniden almak zaman kaybı ve gereksiz aşınma."""
-        assert commands.uc_hazirla(self.HEDEF, {"name": "tool2"}, {}) == []
+        assert commands.uc_hazirla(self.HEDEF, {"name": "tool2"}, self.ACIK) == []
 
     def test_baska_uc_takiliysa_degistiriliyor(self) -> None:
         """Bırakma adımını da Gantry Studio üstleniyor — tek çağrı yetiyor."""
-        adimlar = commands.uc_hazirla(self.HEDEF, {"name": "tool1"}, {})
+        adimlar = commands.uc_hazirla(self.HEDEF, {"name": "tool1"}, self.ACIK)
         assert adimlar == [{"kind": "tool_change", "args": {"name": "tool2"}}]
 
     def test_gorev_atanmamissa_bos(self) -> None:
         """Tek uçlu makinede uç değiştirme diye bir şey yok."""
-        assert commands.uc_hazirla(None, {"name": "tool1"}, {}) == []
+        assert commands.uc_hazirla(None, {"name": "tool1"}, self.ACIK) == []
+
+    def test_kapaliyken_hicbir_sey_uretilmiyor(self) -> None:
+        """Varsayılan kapalı ve kapalıyken tek bir hareket bile çıkmamalı.
+
+        Kilitleme servosu ve varlık sensörü tanımlı olmadan uç alma çalışmıyor
+        ama Gantry Studio "başarılı" diyor: kafa yuvalarda dolaşıp hiçbir şey
+        takmıyor, sonra da "elimde tool1 var" sanıp onu bırakmaya gidiyor.
+        Kapalıyken hiç hareket üretmemek, işe yaramayan hareket üretmekten iyi.
+        """
+        assert commands.uc_hazirla(self.HEDEF, None, {}) == []
+        assert commands.uc_hazirla(self.HEDEF, None, {"enabled": False}) == []
+        assert commands.uc_hazirla(self.HEDEF, {"name": "tool1"}, {}) == []

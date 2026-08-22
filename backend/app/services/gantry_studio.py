@@ -123,6 +123,11 @@ async def uc_istasyonlari(*, tazele: bool = False) -> dict[str, Any]:
             "slide_axis": str(veri.get("slide_axis") or "Y").upper(),
             "approach": veri.get("approach"),
             "lift": veri.get("lift"),
+            # Uç değiştirmenin fiilen çalışıp çalışamayacağı bu ikisine bağlı.
+            # Sıfırsa servo ve sensör bağlı değil demektir; Gantry Studio yine
+            # de "başarılı" diyor, o yüzden panelin bunu söylemesi gerekiyor.
+            "lock_reg": veri.get("lock_reg"),
+            "presence_reg": veri.get("presence_reg"),
         }
         _onbellek_zamani = time.monotonic()
         return _onbellek

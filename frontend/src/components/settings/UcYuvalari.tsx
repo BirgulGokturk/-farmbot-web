@@ -28,7 +28,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Crosshair, Link2, Plus, RefreshCw, Trash2, Wrench } from "lucide-react";
 
-import { Badge, Button, Card, CardHeader, Input, Select } from "@/components/ui/primitives";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  Input,
+  Select,
+  Toggle,
+} from "@/components/ui/primitives";
 import { NumberField } from "@/components/ui/NumberField";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
@@ -191,6 +199,21 @@ export function UcYuvalari({ device }: { device: Device }) {
       zone.slots.filter((y) => !gantryYuvalari.some((g) => g.name === y.name)).length
     : 0;
 
+  /*
+   * Uç değiştirme fiilen çalışabilir mi?
+   *
+   * Gantry Studio'nun kontrolü `read_presence() is False` biçiminde ve sensör
+   * tanımlı değilken `None` dönüyor — yani her deneme "başarılı" sayılıyor.
+   * Servo da yoksa hiçbir şey kilitlenmiyor. Sonuç: kafa yuvalarda dolaşıyor,
+   * uç takılmıyor, Gantry Studio "takıldı" kaydediyor. Bunu panelin söylemesi
+   * gerekiyor; yoksa sebebi ancak robotu izleyerek anlaşılıyor.
+   */
+  const donanimEksik: string[] = [];
+  if (bagli) {
+    if (!gantry?.lock_reg) donanimEksik.push("Kilitleme servosu");
+    if (!gantry?.presence_reg) donanimEksik.push("varlık sensörü");
+  }
+
   // Sunucu ilk 12 yuvayı saklıyor; fazlası sessizce düşerdi.
   const dolu = zone.slots.length >= MAX_YUVA;
 
@@ -200,6 +223,11 @@ export function UcYuvalari({ device }: { device: Device }) {
   const uyarilar: string[] = [];
   const gorevSayisi = (rol: ToolRole) => zone.slots.filter((y) => y.role === rol).length;
 
+  if (!zone.enabled) {
+    uyarilar.push(
+      "Uç değiştirme kapalı — görev atamaları saklanıyor ama robot uç almıyor.",
+    );
+  }
   if (gorevSayisi("seeder") === 0) {
     uyarilar.push("Tohum ucu atanmadı — ekim, uç almadan doğrudan tohumluğa gider.");
   }
@@ -229,6 +257,31 @@ export function UcYuvalari({ device }: { device: Device }) {
           )
         }
       />
+
+      {/* --- Uç değiştirme anahtarı --- */}
+      <div className="mb-3 rounded-xl border border-line bg-surface-2 p-3">
+        <Toggle
+          label="Uç değiştirme açık"
+          checked={zone.enabled}
+          onChange={(enabled) => setZone((o) => ({ ...o, enabled }))}
+        />
+        {donanimEksik.length > 0 ? (
+          <p className="mt-2 text-xs leading-relaxed text-warning">
+            <strong>{donanimEksik.join(" ve ")}</strong> Gantry Studio'da
+            tanımlı değil. Bu hâlde uç alma <strong>çalışmıyor ama çalışmış
+            gibi görünüyor</strong>: kafa yuvanın üstüne gidip iniyor, kayıyor,
+            kalkıyor — hiçbir şey takmadan. Gantry Studio yine de "takıldı"
+            kaydediyor ve sonraki komutta önce o ucu bırakmaya gidiyor. Robotun
+            uç istasyonlarında dolaşmasının sebebi bu. Donanım bağlanana kadar
+            kapalı bırakın.
+          </p>
+        ) : (
+          <p className="mt-2 text-xs leading-relaxed text-subtle">
+            Kapalıyken ekim ve sulama, uç almadan doğrudan işe başlar. Tek uçlu
+            bir makinede doğru davranış bu.
+          </p>
+        )}
+      </div>
 
       {/* --- Kaynak şeridi --- */}
       {bagli ? (
