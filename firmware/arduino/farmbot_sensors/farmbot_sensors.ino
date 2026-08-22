@@ -84,7 +84,7 @@ bool islakMi = false;
 /*
  * POMPALAR
  * --------
- * D4 = hava pompası, D7 = su vanası, D12 = su pompası.
+ * D4 = hava pompası, D7 = su çıkışı (pompa ve vana aynı röleye bağlı).
  *
  * Pin pompayı **beslemiyor**, yalnızca röleyi anahtarlıyor: bir Arduino pini
  * ~20 mA verir, en küçük pompa bile yüzlerce mA çeker. Pompanın gücü ayrı
@@ -96,8 +96,11 @@ bool islakMi = false;
  * yanlış varsayım, açılışta pompanın kendiliğinden çalışması demek.
  */
 #define POMPA_HAVA_PIN 4
-#define SU_VANA_PIN    7
-#define POMPA_SU_PIN   12
+
+// D7 su çıkışının tamamını sürüyor: pompa ve vana **aynı röleye** bağlı,
+// yani birlikte açılıp birlikte kapanıyorlar. Ayrı pin tanımlamak, olmayan
+// bir ikinci röleyi sürmeye çalışmak olurdu.
+#define POMPA_SU_PIN   7
 
 const int POMPA_ACIK   = HIGH;
 const int POMPA_KAPALI = LOW;
@@ -108,7 +111,6 @@ const int POMPA_KAPALI = LOW;
 // "kartın bildirdiği" durumu gösteriyor.
 bool pompaHavaAcik = false;
 bool pompaSuAcik = false;
-bool suVanaAcik = false;
 
 // --- TOPRAK NEMİ (sensör takıldığında) ---
 // Kalibrasyon: probu havada tutunca okunan değer -> TOPRAK_KURU,
@@ -156,8 +158,6 @@ void setup() {
    */
   pinMode(POMPA_HAVA_PIN, OUTPUT);
   digitalWrite(POMPA_HAVA_PIN, POMPA_KAPALI);
-  pinMode(SU_VANA_PIN, OUTPUT);
-  digitalWrite(SU_VANA_PIN, POMPA_KAPALI);
   pinMode(POMPA_SU_PIN, OUTPUT);
   digitalWrite(POMPA_SU_PIN, POMPA_KAPALI);
 
@@ -321,7 +321,6 @@ void paneleGonder(float nem, float dhtSic, float bmpSic,
   // "kartın bildirdiği" durum görünüyor; robot resetlense de doğru kalıyor.
   Serial.print(",\"pompa_hava\":");     Serial.print(pompaHavaAcik ? 1 : 0);
   Serial.print(",\"pompa_su\":");       Serial.print(pompaSuAcik ? 1 : 0);
-  Serial.print(",\"su_vana\":");        Serial.print(suVanaAcik ? 1 : 0);
 
   Serial.println("}");
 }
@@ -377,7 +376,6 @@ void komutlariIsle() {
 
       // Pompa pinleriyse durumu hatırla ki panele doğrusu gitsin
       if (pin == POMPA_HAVA_PIN) pompaHavaAcik = (deger != 0);
-      if (pin == SU_VANA_PIN)    suVanaAcik   = (deger != 0);
       if (pin == POMPA_SU_PIN)   pompaSuAcik  = (deger != 0);
 
       cevapVer(true, "pin");
