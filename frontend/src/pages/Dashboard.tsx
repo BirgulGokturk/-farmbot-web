@@ -204,9 +204,12 @@ export default function Dashboard() {
             <HealthBar label="Bellek" value={info.memory_usage as number | undefined} unit="%" />
             <HealthBar label="Disk" value={info.disk_usage as number | undefined} unit="%" />
             <div className="flex items-center justify-between border-t border-line pt-3.5">
+              {/* "İşlemci sıcaklığı" — sadece "Sıcaklık" yazınca aşağıdaki
+                  Sensörler kartındaki hava sıcaklığıyla karışıyordu. İkisi
+                  ayrı şey: bu Pi'nin çipi, o bahçenin havası. */}
               <span className="flex items-center gap-2 text-sm text-muted">
                 <Thermometer className="size-4" />
-                Sıcaklık
+                İşlemci sıcaklığı
               </span>
               <span className="font-mono text-sm text-content">
                 {info.soc_temp !== undefined ? `${Number(info.soc_temp).toFixed(1)} °C` : "—"}
