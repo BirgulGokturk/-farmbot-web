@@ -178,6 +178,63 @@ def sow_at(
     ]
 
 
+def sulama_recetesi(
+    x: float,
+    y: float,
+    soil_z: float,
+    safe_z: float,
+    recete: dict[str, Any],
+    *,
+    water_pin: int | None,
+    air_pin: int | None,
+    speed: int = 100,
+) -> list[dict[str, Any]]:
+    """Sulama reçetesini komut dizisine çevirir.
+
+    Sıra eskiden koda gömülüydü. Sahada bu yetmiyor: kimi kurulumda hava
+    pompası suyu itmek için **önce**, kimi kurulumda hattı boşaltmak için
+    **sonra** çalışıyor; kimi bitki köke iniş istiyor, kimi yukarıdan damlama.
+
+    Pompanın pini yoksa o adım hiç üretilmiyor — tanımsız bir pini sürmek,
+    bahçede rastgele bir röleyi tetiklemek demek olurdu.
+    """
+    adimlar: list[dict[str, Any]] = []
+
+    if recete.get("go_to_plant", True):
+        # Yatay hareket güvenli yükseklikte; iniş ayrı adım. Ajandaki koruma
+        # da aynısını yapıyor ama burada açıkça yazmak diziyi okunur kılıyor.
+        adimlar.append(move_absolute(x, y, safe_z, speed))
+        if recete.get("descend", True):
+            adimlar.append(move_absolute(x, y, soil_z, speed))
+
+    if recete.get("pre_delay_ms"):
+        adimlar.append(wait(int(recete["pre_delay_ms"])))
+
+    def pompa(pin: int | None, sure_ms: int) -> list[dict[str, Any]]:
+        if not pin or sure_ms <= 0:
+            return []
+        return [write_pin(pin, 1, 0), wait(sure_ms), write_pin(pin, 0, 0)]
+
+    su = pompa(water_pin, int(recete.get("water_ms", 0)))
+    hava = pompa(air_pin, int(recete.get("air_ms", 0)))
+
+    once, sonra = (su, hava) if recete.get("water_first", True) else (hava, su)
+    adimlar.extend(once)
+    # Bekleme yalnızca **iki pompa da çalışıyorsa** anlamlı; tek pompada
+    # araya boşluk koymak sulamayı sebepsiz uzatırdı.
+    if once and sonra and recete.get("between_ms"):
+        adimlar.append(wait(int(recete["between_ms"])))
+    adimlar.extend(sonra)
+
+    if recete.get("post_delay_ms"):
+        adimlar.append(wait(int(recete["post_delay_ms"])))
+
+    if recete.get("retract", True) and recete.get("go_to_plant", True):
+        adimlar.append(move_absolute(x, y, safe_z, speed))
+
+    return adimlar
+
+
 def wait(milliseconds: int) -> dict[str, Any]:
     return {"kind": "wait", "args": {"milliseconds": milliseconds}}
 

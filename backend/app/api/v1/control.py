@@ -188,20 +188,38 @@ async def water_point(
         )
     pump_pin = payload.pump_pin if payload.pump_pin is not None else pompa.pin
 
-    duration_ms = payload.duration_ms
-    if duration_ms is None:
-        if payload.volume_ml is None:
-            raise HTTPException(422, detail="duration_ms veya volume_ml verilmeli")
-        duration_ms = await _duration_from_volume(db, device.id, payload.volume_ml, pompa)
+    recete = dict(machine_config.normalize(device.settings)["irrigation"])
 
-    body = commands.water_at(
+    # İstekte süre ya da hacim varsa reçetedeki süreyi **ezer**: "200 ml sula"
+    # demek, reçetenin varsayılanını değil o hacmi istemek demektir.
+    if payload.duration_ms is not None:
+        recete["water_ms"] = payload.duration_ms
+    elif payload.volume_ml is not None:
+        recete["water_ms"] = await _duration_from_volume(
+            db, device.id, payload.volume_ml, pompa
+        )
+
+    if not recete["water_ms"] and not recete["air_ms"]:
+        raise HTTPException(
+            422,
+            detail=(
+                "Sulama süresi sıfır. Ayarlar → Sulama Reçetesi'nden süre girin "
+                "ya da istekte duration_ms/volume_ml verin."
+            ),
+        )
+
+    # Hava pompası isteğe bağlı; tanımlı değilse reçetedeki adımı üretmiyoruz
+    hava = await _pompa_bul(db, device.id, PeripheralRole.AIR_PUMP)
+
+    body = commands.sulama_recetesi(
         x=point.x,
         y=point.y,
-        z=device.soil_height_mm,
-        duration_ms=duration_ms,
-        pump_pin=pump_pin,
-        speed=payload.speed,
+        soil_z=device.soil_height_mm,
         safe_z=device.safe_height_mm,
+        recete=recete,
+        water_pin=pump_pin,
+        air_pin=hava.pin if hava else None,
+        speed=payload.speed,
     )
     await gunluk.yaz(
         db,
@@ -209,7 +227,7 @@ async def water_point(
         gunluk.ozet(
             "Sulama başladı",
             bitki=point.name,
-            süre=f"{duration_ms / 1000:.0f} sn",
+            süre=f"{recete['water_ms'] / 1000:.1f} sn",
             pin=pump_pin,
         ),
         level=LogLevel.SUCCESS,
@@ -220,15 +238,20 @@ async def water_point(
     return await _dispatch(device, body, wait=False)
 
 
-async def _su_pompasi(db: DbSession, device_id: uuid.UUID) -> Peripheral | None:
-    """Görevi 'su pompası' olarak işaretlenmiş çevre birimi."""
+async def _pompa_bul(
+    db: DbSession, device_id: uuid.UUID, gorev: PeripheralRole
+) -> Peripheral | None:
+    """Belirtilen görevdeki çevre birimi."""
     result = await db.execute(
         select(Peripheral).where(
-            Peripheral.device_id == device_id,
-            Peripheral.role == PeripheralRole.WATER_PUMP,
+            Peripheral.device_id == device_id, Peripheral.role == gorev
         )
     )
     return result.scalars().first()
+
+
+async def _su_pompasi(db: DbSession, device_id: uuid.UUID) -> Peripheral | None:
+    return await _pompa_bul(db, device_id, PeripheralRole.WATER_PUMP)
 
 
 async def _duration_from_volume(

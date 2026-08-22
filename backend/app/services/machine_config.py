@@ -135,6 +135,32 @@ SEEDER_DEFAULTS: dict[str, Any] = {
     "default_depth_mm": 15,   # türün kendi derinliği yoksa
 }
 
+# --------------------------------------------------------------------------- #
+# Sulama reçetesi
+# --------------------------------------------------------------------------- #
+#
+# Sulama sırası eskiden koda gömülüydü: hedefe git, in, pompayı aç, bekle,
+# kapat, kalk. Sahada bu yetmiyor — kimi bitki damlama istiyor, kimi köke
+# doğrudan; hava pompası kimi kurulumda suyu itmek için önce, kimi kurulumda
+# hattı boşaltmak için sonra çalışıyor.
+#
+# Bu yüzden sıra artık ayarlardan geliyor. Süreler milisaniye: saniyeden daha
+# ince ayar gerekiyor (yarım saniyelik bir vuruş damlama için anlamlı).
+#
+# `air_ms = 0` hava pompasının hiç çalışmaması demek — ayrı bir "kapalı"
+# bayrağı koymak, sıfır süreyle aynı şeyi iki türlü anlatmak olurdu.
+IRRIGATION_DEFAULTS: dict[str, Any] = {
+    "go_to_plant": True,    # bitkinin üstüne git; kapalıysa olduğu yerde sular
+    "descend": True,        # toprağa in; kapalıysa güvenli yükseklikte kalır
+    "pre_delay_ms": 0,      # varınca, pompadan önce bekleme
+    "water_first": True,    # önce su mu hava mı
+    "water_ms": 3000,       # su pompası süresi
+    "between_ms": 1000,     # iki pompa arası bekleme
+    "air_ms": 0,            # hava pompası süresi (0 = çalışmasın)
+    "post_delay_ms": 0,     # pompalar bitince bekleme
+    "retract": True,        # bitince ucu güvenli yüksekliğe çek
+}
+
 VIEWER_DEFAULTS: dict[str, Any] = {
     "camera_angle": "on",  # bakış yönü
     "robot_scale": 1.0,   # gantry gövdesinin boyut çarpanı
@@ -434,6 +460,26 @@ def normalize_species(raw: Any) -> dict[str, Any]:
     return result
 
 
+def normalize_irrigation(raw: Any) -> dict[str, Any]:
+    """Sulama reçetesini güvenli bir sözlüğe indirger.
+
+    Süreler üst sınırla korunuyor: yanlışlıkla girilen 300000 ms, pompayı beş
+    dakika açık bırakıp bahçeyi sular ve kimse başında olmayabilir.
+    """
+    source = raw if isinstance(raw, dict) else {}
+    return {
+        "go_to_plant": source.get("go_to_plant") is not False,
+        "descend": source.get("descend") is not False,
+        "water_first": source.get("water_first") is not False,
+        "retract": source.get("retract") is not False,
+        "pre_delay_ms": int(_number(source.get("pre_delay_ms"), 0.0, span=(0, 60000))),
+        "water_ms": int(_number(source.get("water_ms"), 3000.0, span=(0, 600000))),
+        "between_ms": int(_number(source.get("between_ms"), 1000.0, span=(0, 60000))),
+        "air_ms": int(_number(source.get("air_ms"), 0.0, span=(0, 600000))),
+        "post_delay_ms": int(_number(source.get("post_delay_ms"), 0.0, span=(0, 60000))),
+    }
+
+
 def normalize(settings: Any) -> dict[str, Any]:
     """`device.settings` sözlüğünü eksiksiz ve güvenli hâle getirir.
 
@@ -453,6 +499,7 @@ def normalize(settings: Any) -> dict[str, Any]:
     source["travel"] = normalize_travel(source.get("travel"))
     source["seeder"] = normalize_seeder(source.get("seeder"))
     source["species"] = normalize_species(source.get("species"))
+    source["irrigation"] = normalize_irrigation(source.get("irrigation"))
     return source
 
 

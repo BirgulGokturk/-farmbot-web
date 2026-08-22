@@ -135,6 +135,37 @@ export const SPECIES_OVERRIDE_DEFAULTS: SpeciesOverride = {
   days_to_harvest: null,
 };
 
+/**
+ * Sulama reçetesi — robotun sulama sırasında ne yapacağı.
+ *
+ * Sıra eskiden koda gömülüydü. Sahada yetmiyor: kimi kurulumda hava pompası
+ * suyu itmek için önce, kimi kurulumda hattı boşaltmak için sonra çalışıyor.
+ */
+export interface IrrigationRecipe {
+  go_to_plant: boolean;
+  descend: boolean;
+  retract: boolean;
+  water_first: boolean;
+  pre_delay_ms: number;
+  water_ms: number;
+  between_ms: number;
+  /** 0 = hava pompası hiç çalışmasın. */
+  air_ms: number;
+  post_delay_ms: number;
+}
+
+export const IRRIGATION_DEFAULTS: IrrigationRecipe = {
+  go_to_plant: true,
+  descend: true,
+  retract: true,
+  water_first: true,
+  pre_delay_ms: 0,
+  water_ms: 3000,
+  between_ms: 1000,
+  air_ms: 0,
+  post_delay_ms: 0,
+};
+
 export interface MachineConfig {
   axes: Record<AxisName, AxisConfig>;
   /** Yumuşak sınırlar uygulansın mı? Kapalıyken hiçbir hedef reddedilmez. */
@@ -147,6 +178,7 @@ export interface MachineConfig {
   seeder: SeederConfig;
   /** Tür kısa adına göre cihaza özel ayarlar. */
   species: Record<string, SpeciesOverride>;
+  irrigation: IrrigationRecipe;
 }
 
 export const SEEDER_DEFAULTS: SeederConfig = {
@@ -339,6 +371,22 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
       default_depth_mm: num(rawSeeder.default_depth_mm, SEEDER_DEFAULTS.default_depth_mm),
     },
     species: readSpecies(source.species),
+    irrigation: readIrrigation(source.irrigation),
+  };
+}
+
+function readIrrigation(raw: unknown): IrrigationRecipe {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  return {
+    go_to_plant: o.go_to_plant !== false,
+    descend: o.descend !== false,
+    retract: o.retract !== false,
+    water_first: o.water_first !== false,
+    pre_delay_ms: num(o.pre_delay_ms, 0),
+    water_ms: num(o.water_ms, IRRIGATION_DEFAULTS.water_ms),
+    between_ms: num(o.between_ms, IRRIGATION_DEFAULTS.between_ms),
+    air_ms: num(o.air_ms, 0),
+    post_delay_ms: num(o.post_delay_ms, 0),
   };
 }
 
