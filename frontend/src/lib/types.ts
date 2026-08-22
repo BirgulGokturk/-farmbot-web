@@ -145,6 +145,25 @@ export interface GantryStatus {
   url: string | null;
 }
 
+/**
+ * Gantry Studio'daki uç istasyonları.
+ *
+ * Koordinatların tek doğruluk kaynağı orası; bu panel yalnızca aynadan
+ * okuyor. `available: false` geldiğinde ayar kartı elle girme kipine düşüyor
+ * — Gantry Studio kapalıyken de yuva tanımlanabilsin diye.
+ */
+export interface GantryTools {
+  available: boolean;
+  reason?: string;
+  slots?: { name: string; x: number; y: number; z: number }[];
+  current_tool?: string | null;
+  travel_z?: number | null;
+  safe_z?: number | null;
+  slide_axis?: string;
+  approach?: number | null;
+  lift?: number | null;
+}
+
 /** Ajanı bağlamak için panelde gösterilen kısa ömürlü kod. */
 export interface PairingCode {
   code: string;

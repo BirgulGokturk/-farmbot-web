@@ -30,7 +30,7 @@ from app.schemas.control import (
     SurveyRequest,
     WaterPointRequest,
 )
-from app.services import commands, gateway, gunluk, machine_config
+from app.services import commands, gantry_studio, gateway, gunluk, machine_config
 from app.services.mqtt import RpcError, RpcTimeoutError
 
 router = APIRouter(prefix="/devices/{device_id}/control", tags=["Kontrol"])
@@ -215,7 +215,7 @@ async def water_point(
 
     # Sulama ucunu takıyoruz. Yuva tanımlı değilse bu adım atlanıyor —
     # tek uçlu bir makinede uç değiştirme diye bir şey yok.
-    zone = machine_config.normalize(device.settings)["tool_zone"]
+    zone = await _uc_bolgesi(device)
     hazirlik = commands.uc_hazirla(
         _yuva_bul(zone, "waterer"),
         _takili_yuva(zone),
@@ -249,6 +249,30 @@ async def water_point(
 
     # Sulama uzun sürer; yanıtı bekleme, ilerleme WebSocket'ten izlenir
     return await _dispatch(device, body, wait=False)
+
+
+async def _uc_bolgesi(device: Device) -> dict:
+    """Uç bölgesi ayarları, koordinatlar Gantry Studio'dan tazelenmiş hâliyle.
+
+    Saklanan kopyayla yetinmiyoruz: ortak Gantry Studio'da istasyonu
+    kaydırdığında bizim değerimiz eskir ve kafa yuvayı sıyırırdı. Kayma sessiz
+    olurdu — kimse "Eşitle"ye basmayı unuttuğunu fark etmez.
+
+    Takılı ucun **hangisi** olduğunu da oradan alıyoruz: uç alma ve bırakma
+    işini fiilen Gantry Studio yapıyor, dolayısıyla durumun sahibi o. Bizim
+    kaydımız ancak ulaşılamadığında devreye giriyor.
+    """
+    zone = machine_config.normalize(device.settings)["tool_zone"]
+    canli = await gantry_studio.uc_istasyonlari()
+    if not canli.get("available"):
+        return zone
+
+    zone["slots"] = gantry_studio.tazele_yuvalar(
+        zone.get("slots") or [],
+        {y["name"]: {"x": y["x"], "y": y["y"], "z": y["z"]} for y in canli.get("slots", [])},
+    )
+    zone["current_tool"] = canli.get("current_tool")
+    return zone
 
 
 def _yuva_bul(zone: dict, gorev: str) -> dict | None:
@@ -383,7 +407,7 @@ async def sow_points(
     )
     vakum_pin = vakum.pin if vakum else seeder["vacuum_pin"]
 
-    zone = machine_config.normalize(device.settings)["tool_zone"]
+    zone = await _uc_bolgesi(device)
     hazirlik = commands.uc_hazirla(
         _yuva_bul(zone, "seeder"),
         _takili_yuva(zone),

@@ -27,6 +27,7 @@ import type {
   PeripheralRoleValue,
   PlantSpecies,
   GantryStatus,
+  GantryTools,
   PairingCode,
   Point,
   ScatterResult,
@@ -390,6 +391,8 @@ export const api = {
   gantry: {
     /** Sekme gösterilsin mi? Vekil yapılandırılmamışsa menüde yer almıyor. */
     status: () => request<GantryStatus>("/gantry/status"),
+    /** Uç istasyonları — koordinatlar Gantry Studio'da tanımlı, buradan okunuyor. */
+    tools: () => request<GantryTools>("/gantry/tools"),
     /**
      * Gömülü sayfanın kullanacağı çerezi alır.
      *

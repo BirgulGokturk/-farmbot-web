@@ -29,7 +29,13 @@ export interface AxisConfig {
 export type ToolRole = "none" | "seeder" | "waterer" | "soil_probe";
 
 export interface ToolSlot {
+  /**
+   * Gantry Studio'daki istasyon adı. Bu bir **anahtar**: uç alma komutu ve
+   * `current_tool` karşılaştırması bunun üzerinden yürüyor, o yüzden panelden
+   * değiştirilmiyor. Okunur ad için `label` var.
+   */
   name: string;
+  label: string;
   x: number;
   y: number;
   z: number;
@@ -330,6 +336,7 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
               ? [
                   {
                     name,
+                    label: String(slot.label ?? "").trim() || name,
                     x: num(slot.x, 0),
                     y: num(slot.y, 0),
                     z: num(slot.z, 0),

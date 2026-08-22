@@ -282,9 +282,16 @@ def normalize_tool_zone(raw: Any) -> dict[str, Any]:
         if gorev not in TOOL_ROLES:
             gorev = "none"
 
+        # `name` Gantry Studio'daki istasyon adı ve **anahtar**: `current_tool`
+        # ile karşılaştırılan, uç alma komutuna giden değer bu. Değiştirilirse
+        # bağ kopar. `label` ise yalnızca panelde görünen ad — kullanıcı
+        # "tool2" yerine "Toprak Probu" yazabilsin diye ayrı duruyor.
+        etiket = str(item.get("label") or "").strip()
+
         slots.append(
             {
                 "name": name[:60],
+                "label": (etiket or name)[:60],
                 "x": _number(item.get("x"), 0.0),
                 "y": _number(item.get("y"), 0.0),
                 "z": _number(item.get("z"), 0.0),

@@ -48,6 +48,7 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import CurrentUser
 from app.core.config import settings
 from app.core.security import GANTRY_TOKEN_MINUTES, create_token, decode_token
+from app.services import gantry_studio
 
 logger = logging.getLogger(__name__)
 
@@ -265,3 +266,36 @@ async def gantry_session(response: Response, user: CurrentUser) -> dict[str, Any
         )
     issue_cookie(response, str(user.id))
     return {"url": "/gantry-ui/", "expires_minutes": COOKIE_MINUTES}
+
+
+# --------------------------------------------------------------------------- #
+# Uç istasyonları — koordinatların tek doğruluk kaynağı Gantry Studio
+# --------------------------------------------------------------------------- #
+#
+# Ortağın arayüzünde istasyonlar zaten tanımlı ve mekanik oradan doğrulanıyor:
+# yandan yaklaşma, kayma ekseni, kavrama yüksekliği. Aynı sayıları bizim
+# panelimizde ikinci kez elle girmek, er ya da geç birinin diğerinden kayması
+# demekti — robot da hangisine göre hareket ettiğini söylemezdi.
+#
+# İş bölümü:
+#
+#   Gantry Studio → istasyonun **nerede** olduğu (ad, x, y, z)
+#   Bu panel      → istasyonun **ne işe yaradığı** (görev) ve okunur adı
+#
+# Görev bilgisi Gantry Studio'da yok ve oraya eklenmesini istemiyoruz;
+# dokunulmaması gereken kısım orası.
+
+
+@session_router.get("/tools")
+async def gantry_tools(user: CurrentUser) -> dict[str, Any]:
+    """Gantry Studio'daki uç istasyonlarını okur.
+
+    Ulaşılamadığında **hata atmıyor**: panel bu durumda elle girme kipine
+    düşüyor. 500 döndürmek, Gantry Studio kapalıyken ayar sayfasının tamamını
+    kullanılamaz hâle getirirdi.
+
+    Aynı okumayı ekim/sulama komutu da yapıyor; ortak kaynak
+    `services.gantry_studio` — panelde bir sayı gösterip robotu başkasına göre
+    sürmemek için.
+    """
+    return await gantry_studio.uc_istasyonlari(tazele=True)
