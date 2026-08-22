@@ -708,10 +708,16 @@ class Agent:
         if kind == "write_pin":
             pin = int(args.get("pin_number", 0))
             value = int(args.get("pin_value", 0))
+            # Pin yazmak fiziksel bir eylem — pompa çalışıyor, vana açılıyor.
+            # Kayda geçmezse "panel gönderdim diyor ama bir şey olmuyor"
+            # durumunda zincirin neresinde takıldığı görünmüyor.
+            logger.info("Arduino'ya pin komutu: PIN %d %d", pin, value)
             await self._send_arduino(f"PIN {pin} {value}")
 
         elif kind == "set_servo_angle":
-            await self._send_arduino(f"SERVO {int(args.get('pin_value', 0))}")
+            aci = int(args.get("pin_value", 0))
+            logger.info("Arduino'ya servo komutu: SERVO %d", aci)
+            await self._send_arduino(f"SERVO {aci}")
 
         elif kind == "read_pin":
             # Arduino tüm kanalları birlikte yayınlar; tek pin okumak yerine
