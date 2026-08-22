@@ -34,8 +34,12 @@
 #define DHTTYPE DHT11     // Elindeki sensör DHT11
 #define YAGMUR_PIN A0     // HW-103 yağmur sensörünün analog (AO) pini
 // Toprak nemi sensörü henüz yok. Taktığında A1'e bağla ve aşağıdaki
-// TOPRAK_PIN satırını yorumdan çıkar; panelde ayrı bir kanal olarak görünür.
-// #define TOPRAK_PIN A1
+// Toprak nemi probu — uç değiştirme istasyonundaki sensör.
+//
+// A1'de, A0'da DEĞİL: A0'ı yağmur sensörü kullanıyor ve iki analog sensör
+// aynı pini paylaşamaz. Paylaşırlarsa ikisi de birbirinin okumasını bozar ve
+// hangi değerin hangisine ait olduğu anlaşılmaz.
+#define TOPRAK_PIN A1
 #define SERVO_PIN 9       // SG 5010 Servo pini
 
 // --- NESNELERİ OLUŞTURMA ---
@@ -237,10 +241,12 @@ void loop() {
 }
 
 /** Ham ADC değerini 0–100 arası toprak nemi yüzdesine çevirir. */
-// Toprak nemi yüzdesi. A1'e sensör taktığında `TOPRAK_PIN` tanımını yorumdan
-// çıkar, aşağıdaki iki satırı `loop()` içine ekle ve `paneleGonder`'e ilet:
-//   int toprakHam  = analogRead(TOPRAK_PIN);
-//   float toprakYuzde = toprakYuzdesi(toprakHam);
+// Toprak nemi yüzdesi.
+//
+// Katsayılar sahada ölçülerek bulunuyor: probu havada tutunca okunan değer
+// TOPRAK_KURU, suya batırınca okunan TOPRAK_ISLAK olmalı. Aşağıdaki 620/260
+// tahmindir — yağmur sensöründe tahminle gidip yanılmıştık, burada da ham
+// değere bakıp düzeltin.
 float toprakYuzdesi(int ham) {
   long aralik = (long)TOPRAK_KURU - (long)TOPRAK_ISLAK;
   if (aralik == 0) return 0;
@@ -278,6 +284,20 @@ void paneleGonder(float nem, float dhtSic, float bmpSic,
     Serial.print(",\"bmp180_pressure\":");    Serial.print(basincPa / 100.0, 1);
     Serial.print(",\"bmp180_altitude\":");    Serial.print(rakim, 1);
   }
+
+#ifdef TOPRAK_PIN
+  /*
+   * Toprak nemi. Ham değeri de gönderiyoruz çünkü yüzdeye çeviren katsayılar
+   * (TOPRAK_KURU / TOPRAK_ISLAK) sahada ölçülerek bulunuyor — yağmur
+   * sensöründe bunu tahminle yapıp yanılmıştık.
+   *
+   * Ortanca filtresi burada da geçerli: prob toprağa girip çıkarken analog
+   * değer sıçrıyor.
+   */
+  int toprakHam = toprakOku();
+  Serial.print(",\"soil_raw\":");      Serial.print(toprakHam);
+  Serial.print(",\"soil_moisture\":"); Serial.print(toprakYuzdesi(toprakHam), 1);
+#endif
 
   // A0'da tek bir yağmur sensörü var. Önceki sürüm bu değeri ayrıca
   // "hw103_soil" ve "hw103_soil_raw" olarak da gönderiyordu; ortada toprak
@@ -409,6 +429,27 @@ int yagmurOku() {
   }
   return ornekler[2];
 }
+
+#ifdef TOPRAK_PIN
+/** Toprak probunu gürültüden arındırarak okur — beş örneğin ortancası. */
+int toprakOku() {
+  int ornekler[5];
+  for (int i = 0; i < 5; i++) {
+    ornekler[i] = analogRead(TOPRAK_PIN);
+    delay(4);
+  }
+  for (int i = 0; i < 4; i++) {
+    for (int j = i + 1; j < 5; j++) {
+      if (ornekler[j] < ornekler[i]) {
+        int gecici = ornekler[i];
+        ornekler[i] = ornekler[j];
+        ornekler[j] = gecici;
+      }
+    }
+  }
+  return ornekler[2];
+}
+#endif
 
 /**
  * Islaklık durumunu histerezisle günceller.

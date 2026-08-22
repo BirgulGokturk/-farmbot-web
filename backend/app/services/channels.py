@@ -58,6 +58,17 @@ KNOWN_CHANNELS: dict[str, ChannelSpec] = {
     # Kararın hangi sınıra göre verildiği. Ham değerin yanında durması gerekiyor:
     # sahada eşiğin yanlış olduğunu ancak ikisini yan yana görünce fark ettik
     # (sensör kuruyken 336–495 okuyor, eşik 600'dü, panel sürekli "yağmur" diyordu).
+    # Uç değiştirme istasyonundaki toprak nemi probu (A1).
+    #
+    # Ham değer ayrı kanal: yüzdeye çeviren katsayılar sahada ölçülerek
+    # bulunuyor ve ham değeri görmeden ayarlanamıyor. Yağmur sensöründe tam
+    # bunu yaşadık — teşhis işaretli, panelde varsayılan olarak gizli.
+    "soil_moisture": ChannelSpec(
+        "Toprak nemi", SensorKind.SOIL_MOISTURE, "%", "💧", 0, 100
+    ),
+    "soil_raw": ChannelSpec(
+        "Toprak nemi (ham ADC)", SensorKind.GENERIC, "", "🔢", 0, 1023, diagnostic=True
+    ),
     # Pompa durumları — kartın bildirdiği gerçek durum, panelin tahmini değil
     "pompa_su": ChannelSpec("Su pompası", SensorKind.GENERIC, "", "💧", 0, 1),
     "pompa_hava": ChannelSpec("Hava pompası", SensorKind.GENERIC, "", "💨", 0, 1),
