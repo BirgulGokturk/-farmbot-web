@@ -1,19 +1,23 @@
 /**
- * Ekim ayarları — ekilebilir alan, güvenli geçiş ve vakumlu tohum ucu.
+ * Ekim ayarları — güvenli geçiş, vakumlu tohum ucu ve toprak probu.
  *
- * Üçü bir arada duruyor çünkü hepsi aynı soruyu yanıtlıyor: "robot tohumu
- * nereye, nasıl bırakacak?" Kalibrasyon eksenin *nasıl* hareket ettiğini
- * anlatıyor; burası *nereye* gideceğini.
+ * Bir arada duruyorlar çünkü hepsi aynı soruyu yanıtlıyor: "uç toprağa nasıl
+ * inecek?" Kalibrasyon eksenin *nasıl* hareket ettiğini anlatıyor; burası
+ * *nereye ve ne kadar* ineceğini.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Move3d, Sprout } from "lucide-react";
+import { Gauge, Move3d, Sprout } from "lucide-react";
 
 import { Button, Card, CardHeader, Toggle } from "@/components/ui/primitives";
 import { NumberField } from "@/components/ui/NumberField";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
-import { readMachineConfig, type SeederConfig } from "@/lib/machine";
+import {
+  readMachineConfig,
+  type ProbeConfig,
+  type SeederConfig,
+} from "@/lib/machine";
 import { useServerForm } from "@/hooks/useServerForm";
 import { useBotPosition } from "@/store/useBot";
 import type { Device } from "@/lib/types";
@@ -205,6 +209,77 @@ export function SeederSettings({ device }: { device: Device }) {
         Bekleme süreleri sahada denenerek bulunur: vakumun tohumu tutması da
         bırakması da anlık değil, pompanın gücüne ve tohumun ağırlığına göre
         değişiyor.
+      </p>
+
+      <Button
+        variant="primary"
+        fullWidth
+        className="mt-4"
+        disabled={!dirty}
+        loading={save.isPending}
+        onClick={() => save.mutate()}
+      >
+        Kaydet
+      </Button>
+    </Card>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+// Toprak nemi probu
+// --------------------------------------------------------------------------- //
+
+export function ProbeSettings({ device }: { device: Device }) {
+  const queryClient = useQueryClient();
+  const stored = readMachineConfig(device.settings);
+  const [probe, setProbe, dirty] = useServerForm<ProbeConfig>(stored.probe);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.devices.update(device.id, { settings: { ...device.settings, probe } }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["device", device.id] });
+      toast.success("Prob ayarları kaydedildi");
+    },
+    onError: (error) => toast.error("Kaydedilemedi", (error as Error).message),
+  });
+
+  return (
+    <Card>
+      <CardHeader
+        title="Toprak Probu"
+        subtitle="Ölçüm derinliği ve bekleme"
+        icon={<Gauge className="size-4" />}
+      />
+
+      <p className="mb-3 rounded-xl bg-surface-2 p-3 text-xs leading-relaxed text-subtle">
+        Prob toprağa <strong className="text-content">batırılıyor</strong>:
+        yüzeyde tutulan bir okuma havayı ölçer ve her noktada aynı çıkar.
+        Okumadan önce beklemek de şart — dirençli prob toprağa girer girmez
+        okumuyor, nem iki uç arasında dengelenene kadar birkaç saniye geçiyor.
+        Beklemeden okumak ıslak toprağı kuru gösteriyordu.
+      </p>
+
+      <div className="grid grid-cols-2 gap-3">
+        <NumberField
+          name="probe_depth"
+          label="Derinlik (mm)"
+          value={probe.depth_mm}
+          min={0}
+          onChange={(depth_mm) => setProbe({ ...probe, depth_mm })}
+        />
+        <NumberField
+          name="probe_settle"
+          label="Bekleme (ms)"
+          value={probe.settle_ms}
+          min={0}
+          onChange={(settle_ms) => setProbe({ ...probe, settle_ms })}
+        />
+      </div>
+
+      <p className="mt-2 text-xs leading-relaxed text-subtle">
+        Derinlik toprak yüzeyinden aşağı ölçülüyor. Probun metal ucundan uzun
+        bir değer, probu toprağa değil yatağın tabanına sürer.
       </p>
 
       <Button

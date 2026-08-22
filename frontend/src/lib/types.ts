@@ -139,6 +139,9 @@ export interface PlantSpecies {
 }
 
 /** Rastgele serpiştirme sonucu — alan dolduysa `skipped` kaç tane sığmadığını söyler. */
+/** Serbest koordinatta yapılabilecek iş. */
+export type SpotAction = "sow" | "water" | "soil_probe";
+
 /** Gantry Studio sekmesi bu kurulumda var mı? */
 export interface GantryStatus {
   enabled: boolean;

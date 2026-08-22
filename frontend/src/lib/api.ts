@@ -28,6 +28,7 @@ import type {
   PlantSpecies,
   GantryStatus,
   GantryTools,
+  SpotAction,
   PairingCode,
   Point,
   ScatterResult,
@@ -595,6 +596,31 @@ export const api = {
       input: { point_id: string; duration_ms?: number; volume_ml?: number; pump_pin?: number },
     ) =>
       request<CommandResponse>(`/devices/${deviceId}/control/water`, {
+        method: "POST",
+        body: input,
+      }),
+    /**
+     * Serbest koordinatta tek iş: oraya git ve şunu yap.
+     *
+     * `sow`/`water` kayıtlı bir bitkiye bağlı; bu ise kayıt istemiyor —
+     * denemek için tarla tasarımcısında bitki açıp silmek gerekmesin diye.
+     */
+    spot: (
+      deviceId: string,
+      input: {
+        x: number;
+        y: number;
+        action: SpotAction;
+        speed?: number;
+        depth_mm?: number;
+        species_id?: string;
+        duration_ms?: number;
+        volume_ml?: number;
+        sensor_id?: string;
+        probe_depth_mm?: number;
+      },
+    ) =>
+      request<CommandResponse>(`/devices/${deviceId}/control/spot`, {
         method: "POST",
         body: input,
       }),

@@ -178,6 +178,41 @@ def sow_at(
     ]
 
 
+def toprak_olc(
+    x: float,
+    y: float,
+    soil_z: float,
+    safe_z: float,
+    *,
+    depth_mm: float,
+    pin: int,
+    mode: int = 1,
+    label: str = "toprak_nemi",
+    settle_ms: int = 2000,
+    speed: int = 100,
+) -> list[dict[str, Any]]:
+    """Probu bir noktada toprağa batırıp ölçüm al, sonra çek.
+
+    Neden batırılıyor: yüzeyde tutulan bir okuma havayı ölçer ve her noktada
+    aynı çıkar. `depth_mm` toprak yüzeyinden **aşağı** ölçülüyor, bu yüzden
+    çıkarılıyor.
+
+    Neden bekleniyor: dirençli prob toprağa girer girmez okumuyor, nem iki uç
+    arasında dengelenene kadar birkaç saniye geçiyor. Beklemeden okumak ıslak
+    toprağı kuru gösteriyordu.
+
+    Neden sonunda çekiliyor: prob toprakta kalırsa bir sonraki yatay hareket
+    onu toprağın içinden sürükler.
+    """
+    return [
+        move_absolute(x, y, safe_z, speed),          # güvenli yükseklikte yatayda git
+        move_absolute(x, y, soil_z - depth_mm, speed),  # toprağa bat
+        wait(settle_ms),                             # okuma dengelensin
+        read_pin(pin, mode, label),
+        move_absolute(x, y, safe_z, speed),          # probu topraktan çek
+    ]
+
+
 def sulama_recetesi(
     x: float,
     y: float,

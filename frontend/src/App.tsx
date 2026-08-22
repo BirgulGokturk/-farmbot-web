@@ -20,6 +20,7 @@ const Viewer3D = lazy(() => import("@/pages/Viewer3D"));
 const Sensors = lazy(() => import("@/pages/Sensors"));
 const CameraPage = lazy(() => import("@/pages/CameraPage"));
 const Sequences = lazy(() => import("@/pages/Sequences"));
+const Nokta = lazy(() => import("@/pages/Nokta"));
 const Plants = lazy(() => import("@/pages/Plants"));
 const Curves = lazy(() => import("@/pages/Curves"));
 const Schedule = lazy(() => import("@/pages/Schedule"));
@@ -132,6 +133,7 @@ export default function App() {
               sekmesinde. Yer imi ya da eski bağlantı 404 görmesin. */}
           <Route path="control" element={<Navigate to="/gantry" replace />} />
           <Route path="tool-zone" element={<Navigate to="/gantry" replace />} />
+          <Route path="spot" element={<Nokta />} />
           <Route path="sequences" element={<Sequences />} />
           <Route path="designer" element={<Designer />} />
           <Route path="plants" element={<Plants />} />

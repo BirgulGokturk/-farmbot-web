@@ -14,6 +14,7 @@ import {
   LineChart,
   ListTree,
   Map,
+  MapPin,
   ScrollText,
   Settings,
   Workflow,
@@ -76,6 +77,13 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Hareket Kontrolü",
         icon: Gamepad2,
         description: "Eksen sürme, ev arama, uç değiştirme, kalibrasyon",
+        primary: true,
+      },
+      {
+        path: "/spot",
+        label: "Noktada İşlem",
+        icon: MapPin,
+        description: "Koordinat gir; tohum bırak, sula ya da nemi ölç",
         primary: true,
       },
       {

@@ -171,6 +171,23 @@ IRRIGATION_DEFAULTS: dict[str, Any] = {
     "retract": True,         # bitince ucu güvenli yüksekliğe çek
 }
 
+# --------------------------------------------------------------------------- #
+# Toprak nemi probu
+# --------------------------------------------------------------------------- #
+#
+# Prob toprağa **batırılıyor**: yüzeyde tutulan bir okuma havayı ölçer ve her
+# noktada aynı çıkar. Derinlik bu yüzden ayar — kum ile killi toprakta aynı
+# değil ve probun metal ucunun boyu da kurulumdan kuruluma değişiyor.
+#
+# Bekleme de gerekli: dirençli prob toprağa girer girmez okumuyor, nem iki uç
+# arasında dengelenene kadar birkaç saniye geçiyor. Beklemeden okumak, ıslak
+# toprağı kuru gösteriyordu.
+
+PROBE_DEFAULTS: dict[str, Any] = {
+    "depth_mm": 30.0,     # toprak yüzeyinden aşağı
+    "settle_ms": 2000,    # okumadan önce beklenen süre
+}
+
 VIEWER_DEFAULTS: dict[str, Any] = {
     "camera_angle": "on",  # bakış yönü
     "robot_scale": 1.0,   # gantry gövdesinin boyut çarpanı
@@ -428,6 +445,21 @@ def normalize_seeder(raw: Any) -> dict[str, Any]:
     }
 
 
+def normalize_probe(raw: Any) -> dict[str, Any]:
+    """Toprak probu ayarları.
+
+    Derinlik üst sınırla korunuyor: yanlışlıkla girilen büyük bir değer probu
+    toprağa değil, yatağın tabanına sürerdi.
+    """
+    source = raw if isinstance(raw, dict) else {}
+    return {
+        "depth_mm": _number(source.get("depth_mm"), PROBE_DEFAULTS["depth_mm"], span=(0, 500)),
+        "settle_ms": int(
+            _number(source.get("settle_ms"), float(PROBE_DEFAULTS["settle_ms"]), span=(0, 60000))
+        ),
+    }
+
+
 def planting_bounds(device: Any, settings: Any = None) -> tuple[float, float, float, float]:
     """Ekilebilir dikdörtgen: (x_min, x_max, y_min, y_max).
 
@@ -530,6 +562,7 @@ def normalize(settings: Any) -> dict[str, Any]:
     source["seeder"] = normalize_seeder(source.get("seeder"))
     source["species"] = normalize_species(source.get("species"))
     source["irrigation"] = normalize_irrigation(source.get("irrigation"))
+    source["probe"] = normalize_probe(source.get("probe"))
     return source
 
 

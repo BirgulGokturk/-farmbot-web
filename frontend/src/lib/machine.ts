@@ -121,6 +121,23 @@ export interface SeederConfig {
 }
 
 /**
+ * Toprak nemi probu.
+ *
+ * Prob toprağa batırılıyor: yüzeyde tutulan bir okuma havayı ölçer ve her
+ * noktada aynı çıkar. Bekleme de gerekli — dirençli prob toprağa girer girmez
+ * okumuyor, nem iki uç arasında dengelenene kadar birkaç saniye geçiyor.
+ */
+export interface ProbeConfig {
+  depth_mm: number;
+  settle_ms: number;
+}
+
+export const PROBE_DEFAULTS: ProbeConfig = {
+  depth_mm: 30,
+  settle_ms: 2000,
+};
+
+/**
  * Bir bitki türü için cihaza özel ayar.
  *
  * Katalog küresel — tüm kullanıcılar aynı satırları paylaşıyor. "Benim
@@ -195,6 +212,7 @@ export interface MachineConfig {
   /** Tür kısa adına göre cihaza özel ayarlar. */
   species: Record<string, SpeciesOverride>;
   irrigation: IrrigationRecipe;
+  probe: ProbeConfig;
 }
 
 export const SEEDER_DEFAULTS: SeederConfig = {
@@ -401,6 +419,16 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
     },
     species: readSpecies(source.species),
     irrigation: readIrrigation(source.irrigation),
+    probe: {
+      depth_mm: num(
+        ((source.probe ?? {}) as Record<string, unknown>).depth_mm,
+        PROBE_DEFAULTS.depth_mm,
+      ),
+      settle_ms: num(
+        ((source.probe ?? {}) as Record<string, unknown>).settle_ms,
+        PROBE_DEFAULTS.settle_ms,
+      ),
+    },
   };
 }
 

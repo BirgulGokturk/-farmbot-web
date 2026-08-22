@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import uuid
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from app.models.enums import Axis
+
+
+class SpotAction(str, Enum):
+    """Serbest koordinatta yapılabilecek işler."""
+
+    SOW = "sow"                  # tohum al, oraya bırak
+    WATER = "water"              # reçeteye göre sula
+    SOIL_PROBE = "soil_probe"    # probu batır, nem oku
 
 
 class MoveRelativeRequest(BaseModel):
@@ -68,6 +77,37 @@ class SowRequest(BaseModel):
     speed: int = Field(default=100, ge=1, le=100)
     # Ekim sonrası bitkiler "ekildi" olarak işaretlensin mi
     mark_planted: bool = True
+
+
+class SpotTaskRequest(BaseModel):
+    """Serbest koordinatta tek iş: oraya git ve şunu yap.
+
+    Neden ayrı bir uç nokta: `sow` ve `water` kayıtlı bir bitkiye (Point)
+    bağlı çalışıyor. Tasarımda yeri olmayan bir noktayı denemek, sulamayı
+    ölçmek ya da tek bir tohum bırakmak için önce bitki kaydı açmak gerekiyordu
+    — deneme yapmak isteyen biri için gereksiz bir yol.
+
+    `species_id` yalnızca ekimde ve yalnızca derinlik için: tür katalogda bir
+    derinlik taşıyorsa onu kullanmak, kullanıcının aynı sayıyı ezberden
+    girmesinden iyi.
+    """
+
+    x: float = Field(ge=-1000, le=20000)
+    y: float = Field(ge=-1000, le=20000)
+    action: SpotAction
+    speed: int = Field(default=100, ge=1, le=100)
+
+    # Ekim
+    depth_mm: float | None = Field(default=None, ge=0, le=500)
+    species_id: uuid.UUID | None = None
+
+    # Sulama — ikisi de boşsa reçetedeki süre geçerli
+    duration_ms: int | None = Field(default=None, gt=0, le=600_000)
+    volume_ml: int | None = Field(default=None, gt=0, le=100_000)
+
+    # Toprak ölçümü — boşsa toprak nemi sensörü kendiliğinden bulunuyor
+    sensor_id: uuid.UUID | None = None
+    probe_depth_mm: float | None = Field(default=None, ge=0, le=500)
 
 
 class ServoRequest(BaseModel):

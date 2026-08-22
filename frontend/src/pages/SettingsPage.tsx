@@ -16,6 +16,7 @@ import { toast } from "@/components/ui/toast";
 import { AgentSetup } from "@/components/settings/AgentSetup";
 import { Calibration } from "@/components/settings/Calibration";
 import {
+  ProbeSettings,
   SeederSettings,
   TravelSettings,
 } from "@/components/settings/Planting";
@@ -52,6 +53,7 @@ export default function SettingsPage() {
         {device && <UcYuvalari device={device} />}
         {device && <IrrigationSettings device={device} />}
         {device && <SeederSettings device={device} />}
+        {device && <ProbeSettings device={device} />}
         <AgentSetup />
         <HardwareSettings />
         <InstallApp />

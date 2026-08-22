@@ -14,8 +14,8 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession, OwnedDevice, ensure_unlocked
 from app.db.base import utcnow
-from app.models import Device, Peripheral, Point, Sensor, Tool
-from app.models.enums import LogLevel, PeripheralRole, PlantStage, PointType
+from app.models import Device, Peripheral, PlantSpecies, Point, Sensor, Tool
+from app.models.enums import LogLevel, PeripheralRole, PlantStage, PointType, SensorKind
 from app.schemas.control import (
     CommandResponse,
     ExecuteSequenceRequest,
@@ -27,6 +27,8 @@ from app.schemas.control import (
     RawCommandRequest,
     ServoRequest,
     SowRequest,
+    SpotAction,
+    SpotTaskRequest,
     SurveyRequest,
     WaterPointRequest,
 )
@@ -461,6 +463,219 @@ async def sow_points(
     response = await _dispatch(device, body, wait=False)
     response.detail = f"{len(points)} tohum ekim sırasına alındı"
     return response
+
+
+# --------------------------------------------------------------------------- #
+# Noktada iş — serbest koordinat
+# --------------------------------------------------------------------------- #
+#
+# `sow` ve `water` kayıtlı bir bitkiye bağlı çalışıyor. Tasarımda yeri olmayan
+# bir noktayı denemek için önce bitki kaydı açmak gerekiyordu; deneme yapmak
+# isteyen biri için gereksiz bir yol. Burası o boşluğu kapatıyor: koordinat
+# gir, işi seç, robot gitsin.
+#
+# Üç iş de aynı iskeleti paylaşıyor — doğru ucu tak, noktaya git, işi yap —
+# ama farklı uçlar ve farklı adımlar istiyor. Ayrı uç noktalar açmak yerine
+# tek `action` alanı: arayüzde de tek bir kart, tek bir "Çalıştır" düğmesi.
+
+@router.post("/spot", response_model=CommandResponse)
+async def spot_task(
+    payload: SpotTaskRequest, device: OwnedDevice, db: DbSession
+) -> CommandResponse:
+    """Verilen koordinata gidip seçilen işi yapar."""
+    ensure_unlocked(device)
+    _assert_reachable(device, payload.x, payload.y)
+
+    ayarlar = machine_config.normalize(device.settings)
+    zone = await _uc_bolgesi(device)
+    hiz = payload.speed
+
+    def hazirla(gorev: str) -> list[dict]:
+        return commands.uc_hazirla(
+            _yuva_bul(zone, gorev),
+            _takili_yuva(zone),
+            zone,
+            int(zone.get("change_speed", 20)),
+        )
+
+    # --- Tohum bırak ------------------------------------------------------- #
+    if payload.action == SpotAction.SOW:
+        seeder = ayarlar["seeder"]
+        if not seeder["enabled"]:
+            raise HTTPException(
+                422,
+                detail=(
+                    "Vakumlu tohum ucu tanımlı değil. Ayarlar → Vakumlu Uç'tan "
+                    "tepsi konumunu ve vakum pinini girin."
+                ),
+            )
+
+        # Ekim alanı yalnızca ekimde geçerli: sulama ve ölçüm yatağın her
+        # yerinde yapılabilir, tohum ise metale düşmemeli.
+        x_min, x_max, y_min, y_max = machine_config.planting_bounds(device)
+        if not (x_min <= payload.x <= x_max and y_min <= payload.y <= y_max):
+            raise HTTPException(
+                422,
+                detail=(
+                    f"Nokta ekim alanının dışında "
+                    f"(X {x_min:.0f}–{x_max:.0f}, Y {y_min:.0f}–{y_max:.0f} mm)."
+                ),
+            )
+
+        derinlik = payload.depth_mm
+        if derinlik is None and payload.species_id is not None:
+            tur = await db.get(PlantSpecies, payload.species_id)
+            if tur is not None:
+                derinlik = float(tur.sow_depth_mm)
+        if derinlik is None:
+            derinlik = float(seeder["default_depth_mm"])
+
+        vakum = await _pompa_bul(db, device.id, PeripheralRole.VACUUM) or await _pompa_bul(
+            db, device.id, PeripheralRole.AIR_PUMP
+        )
+        body = hazirla("seeder") + commands.sow_at(
+            x=payload.x,
+            y=payload.y,
+            soil_z=device.soil_height_mm,
+            depth_mm=derinlik,
+            tray=(seeder["tray_x_mm"], seeder["tray_y_mm"], seeder["tray_z_mm"]),
+            vacuum_pin=vakum.pin if vakum else seeder["vacuum_pin"],
+            pick_dwell_ms=seeder["pick_dwell_ms"],
+            release_dwell_ms=seeder["release_dwell_ms"],
+            speed=hiz,
+        )
+        ozet = gunluk.ozet(
+            "Noktaya tohum bırakılıyor",
+            konum=f"X{payload.x:.0f} Y{payload.y:.0f}",
+            derinlik=f"{derinlik:.0f} mm",
+        )
+        detay = f"X{payload.x:.0f} Y{payload.y:.0f} noktasına tohum bırakılıyor"
+
+    # --- Sula -------------------------------------------------------------- #
+    elif payload.action == SpotAction.WATER:
+        pompa = await _su_pompasi(db, device.id)
+        if pompa is None:
+            raise HTTPException(
+                422,
+                detail=(
+                    "Su pompası tanımlı değil. Ayarlar → Çevre Birimleri'nden "
+                    "bir birim ekleyip görevini 'Su pompası' seçin."
+                ),
+            )
+
+        recete = dict(ayarlar["irrigation"])
+        # İstekteki süre/hacim reçeteyi ezer: "200 ml" demek, reçetenin
+        # varsayılanını değil o hacmi istemek demek.
+        if payload.duration_ms is not None:
+            recete["water_ms"] = payload.duration_ms
+        elif payload.volume_ml is not None:
+            recete["water_ms"] = await _duration_from_volume(
+                db, device.id, payload.volume_ml, pompa
+            )
+        if recete["water_ms"] <= 0:
+            raise HTTPException(
+                422,
+                detail=(
+                    "Sulama süresi sıfır. Ayarlar → Sulama Reçetesi'nden süre girin "
+                    "ya da süre/hacim verin."
+                ),
+            )
+
+        # Reçetede "bitkinin üstüne git" kapalı olabilir; orada anlamı "sabit
+        # hatta sula". Burada koordinat **istekle** geliyor, gitmemek işi
+        # anlamsız kılardı.
+        recete["go_to_plant"] = True
+
+        hava = await _pompa_bul(db, device.id, PeripheralRole.AIR_PUMP)
+        vana = await _pompa_bul(db, device.id, PeripheralRole.VALVE)
+        body = hazirla("waterer") + commands.sulama_recetesi(
+            x=payload.x,
+            y=payload.y,
+            soil_z=device.soil_height_mm,
+            safe_z=device.safe_height_mm,
+            recete=recete,
+            water_pin=pompa.pin,
+            air_pin=hava.pin if hava else None,
+            valve_pin=vana.pin if vana else None,
+            speed=hiz,
+        )
+        ozet = gunluk.ozet(
+            "Noktada sulama",
+            konum=f"X{payload.x:.0f} Y{payload.y:.0f}",
+            süre=f"{recete['water_ms'] / 1000:.1f} sn",
+            pin=pompa.pin,
+        )
+        detay = f"X{payload.x:.0f} Y{payload.y:.0f} noktası sulanıyor"
+
+    # --- Toprak nemi ------------------------------------------------------- #
+    else:
+        sensor = await _toprak_sensoru(db, device.id, payload.sensor_id)
+        if sensor is None:
+            raise HTTPException(
+                422,
+                detail=(
+                    "Toprak nemi sensörü bulunamadı. Sensörler sayfasından "
+                    "kanalı 'toprak nemi' olan bir sensör tanımlayın."
+                ),
+            )
+        if sensor.pin is None:
+            raise HTTPException(
+                422,
+                detail=f"'{sensor.label}' bir pine bağlı değil; okunamaz.",
+            )
+
+        prob = ayarlar["probe"]
+        derinlik = payload.probe_depth_mm
+        if derinlik is None:
+            derinlik = float(prob["depth_mm"])
+
+        body = hazirla("soil_probe") + commands.toprak_olc(
+            x=payload.x,
+            y=payload.y,
+            soil_z=device.soil_height_mm,
+            safe_z=device.safe_height_mm,
+            depth_mm=derinlik,
+            pin=sensor.pin,
+            mode=sensor.mode,
+            label=sensor.channel or sensor.label,
+            settle_ms=int(prob["settle_ms"]),
+            speed=hiz,
+        )
+        ozet = gunluk.ozet(
+            "Noktada toprak ölçümü",
+            konum=f"X{payload.x:.0f} Y{payload.y:.0f}",
+            derinlik=f"{derinlik:.0f} mm",
+            sensör=sensor.label,
+        )
+        detay = f"X{payload.x:.0f} Y{payload.y:.0f} noktasında nem ölçülüyor"
+
+    await gunluk.yaz(db, device, ozet, level=LogLevel.SUCCESS, commit=True)
+
+    # Yanıt beklenmiyor: uç alma dahil bütün dizi bir dakikayı bulabiliyor ve
+    # ilerleme zaten WebSocket'ten izleniyor.
+    response = await _dispatch(device, body, wait=False)
+    response.detail = detay
+    return response
+
+
+async def _toprak_sensoru(
+    db: DbSession, device_id: uuid.UUID, sensor_id: uuid.UUID | None
+) -> Sensor | None:
+    """Ölçümü alacak sensör.
+
+    İstek açıkça birini verirse o geçerli. Vermezse toprak nemi türündeki
+    **takılı** sensör aranıyor: takılı olmayan kanal gürültü üretiyor ve
+    ölçüm anlamsız bir sayı yazardı.
+    """
+    stmt = select(Sensor).where(Sensor.device_id == device_id)
+    if sensor_id is not None:
+        stmt = stmt.where(Sensor.id == sensor_id)
+    else:
+        stmt = stmt.where(
+            Sensor.kind == SensorKind.SOIL_MOISTURE,
+            Sensor.installed.is_(True),
+        )
+    return (await db.execute(stmt.order_by(Sensor.created_at))).scalars().first()
 
 
 # --------------------------------------------------------------------------- #
