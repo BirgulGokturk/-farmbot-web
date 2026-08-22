@@ -187,6 +187,7 @@ def sulama_recetesi(
     *,
     water_pin: int | None,
     air_pin: int | None,
+    valve_pin: int | None = None,
     speed: int = 100,
 ) -> list[dict[str, Any]]:
     """Sulama reçetesini komut dizisine çevirir.
@@ -195,8 +196,13 @@ def sulama_recetesi(
     pompası suyu itmek için **önce**, kimi kurulumda hattı boşaltmak için
     **sonra** çalışıyor; kimi bitki köke iniş istiyor, kimi yukarıdan damlama.
 
-    Pompanın pini yoksa o adım hiç üretilmiyor — tanımsız bir pini sürmek,
-    bahçede rastgele bir röleyi tetiklemek demek olurdu.
+    Vana su hattında ve pompayı **sarmalıyor**: pompadan önce açılıyor, sonra
+    kapanıyor. Pompayı kapalı vanaya karşı çalıştırmak hattı zorlar; vanayı
+    pompa durur durmaz kapatmak da hatta basınç hapseder. Aradaki iki bekleme
+    (`valve_lead_ms`, `valve_lag_ms`) bunun içindir.
+
+    Bir birimin pini tanımlı değilse o adım hiç üretilmiyor — tanımsız bir
+    pini sürmek, bahçede rastgele bir röleyi tetiklemek demek olurdu.
     """
     adimlar: list[dict[str, Any]] = []
 
@@ -210,13 +216,21 @@ def sulama_recetesi(
     if recete.get("pre_delay_ms"):
         adimlar.append(wait(int(recete["pre_delay_ms"])))
 
-    def pompa(pin: int | None, sure_ms: int) -> list[dict[str, Any]]:
+    def calistir(pin: int | None, sure_ms: int) -> list[dict[str, Any]]:
         if not pin or sure_ms <= 0:
             return []
         return [write_pin(pin, 1, 0), wait(sure_ms), write_pin(pin, 0, 0)]
 
-    su = pompa(water_pin, int(recete.get("water_ms", 0)))
-    hava = pompa(air_pin, int(recete.get("air_ms", 0)))
+    su = calistir(water_pin, int(recete.get("water_ms", 0)))
+    hava = calistir(air_pin, int(recete.get("air_ms", 0)))
+
+    # Vana yalnızca su gerçekten akacaksa açılıyor: su süresi sıfırken vanayı
+    # açıp kapatmak boşuna aşınma.
+    vana_var = bool(valve_pin) and bool(su)
+    if vana_var:
+        adimlar.append(write_pin(valve_pin, 1, 0))
+        if recete.get("valve_lead_ms"):
+            adimlar.append(wait(int(recete["valve_lead_ms"])))
 
     once, sonra = (su, hava) if recete.get("water_first", True) else (hava, su)
     adimlar.extend(once)
@@ -225,6 +239,11 @@ def sulama_recetesi(
     if once and sonra and recete.get("between_ms"):
         adimlar.append(wait(int(recete["between_ms"])))
     adimlar.extend(sonra)
+
+    if vana_var:
+        if recete.get("valve_lag_ms"):
+            adimlar.append(wait(int(recete["valve_lag_ms"])))
+        adimlar.append(write_pin(valve_pin, 0, 0))
 
     if recete.get("post_delay_ms"):
         adimlar.append(wait(int(recete["post_delay_ms"])))

@@ -40,6 +40,7 @@ export function IrrigationSettings({ device }: { device: Device }) {
 
   const su = peripherals?.find((p) => p.role === "water_pump");
   const hava = peripherals?.find((p) => p.role === "air_pump");
+  const vana = peripherals?.find((p) => p.role === "valve");
 
   const kaydet = useMutation({
     mutationFn: () =>
@@ -132,6 +133,18 @@ export function IrrigationSettings({ device }: { device: Device }) {
           onChange={(v) => alan("water_ms", v)}
         />
         <NumberField
+          label="Vana → pompa (ms)"
+          value={recete.valve_lead_ms}
+          min={0}
+          onChange={(v) => alan("valve_lead_ms", v)}
+        />
+        <NumberField
+          label="Pompa → vana kapat (ms)"
+          value={recete.valve_lag_ms}
+          min={0}
+          onChange={(v) => alan("valve_lag_ms", v)}
+        />
+        <NumberField
           label="Pompalar arası (ms)"
           value={recete.between_ms}
           min={0}
@@ -156,20 +169,27 @@ export function IrrigationSettings({ device }: { device: Device }) {
         hiç çalışmaz. Süreler milisaniye: 1000 ms = 1 saniye.
       </p>
 
+      <p className="mt-2 text-xs leading-relaxed text-subtle">
+        Vana su hattında ve pompayı <strong className="text-content">sarmalıyor</strong>:
+        pompadan önce açılıyor, sonra kapanıyor. Pompayı kapalı vanaya karşı
+        çalıştırmak hattı zorlar; vanayı pompa durur durmaz kapatmak da hatta
+        basınç hapseder. İki bekleme bunun için.
+      </p>
+
       {/* --- Önizleme --- */}
       <div className="mt-4 rounded-xl border border-line bg-surface-2 p-3.5">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
           Robotun atacağı adımlar
         </p>
         <ol className="space-y-1 font-mono text-[11px] leading-relaxed text-success/85">
-          {onizleme(recete, su?.pin, hava?.pin).map((satir, i) => (
+          {onizleme(recete, su?.pin, hava?.pin, vana?.pin).map((satir, i) => (
             <li key={i}>
               {i + 1}. {satir}
             </li>
           ))}
         </ol>
         <p className="mt-2 text-[11px] leading-relaxed text-subtle">
-          Toplam yaklaşık {(toplamSure(recete) / 1000).toFixed(1)} saniye
+          Toplam yaklaşık {(toplamSure(recete, Boolean(vana)) / 1000).toFixed(1)} saniye
           (hareket süresi hariç).
         </p>
       </div>
@@ -200,6 +220,7 @@ function onizleme(
   r: IrrigationRecipe,
   suPin: number | undefined,
   havaPin: number | undefined,
+  vanaPin: number | undefined,
 ): string[] {
   const adimlar: string[] = [];
 
@@ -217,14 +238,26 @@ function onizleme(
 
   const su = pompa("su pompasını", suPin, r.water_ms);
   const hava = pompa("hava pompasını", havaPin, r.air_ms);
-  const [once, sonra] = r.water_first ? [su, hava] : [hava, su];
 
+  // Vana yalnızca su gerçekten akacaksa açılıyor
+  const vanaVar = Boolean(vanaPin) && su.length > 0;
+  if (vanaVar) {
+    adimlar.push(`vanayı aç (pin ${vanaPin})`);
+    if (r.valve_lead_ms) adimlar.push(`${r.valve_lead_ms} ms bekle`);
+  }
+
+  const [once, sonra] = r.water_first ? [su, hava] : [hava, su];
   adimlar.push(...once);
   // Bekleme yalnızca iki pompa da çalışıyorsa anlamlı
   if (once.length && sonra.length && r.between_ms) {
     adimlar.push(`${r.between_ms} ms bekle`);
   }
   adimlar.push(...sonra);
+
+  if (vanaVar) {
+    if (r.valve_lag_ms) adimlar.push(`${r.valve_lag_ms} ms bekle`);
+    adimlar.push("vanayı kapat");
+  }
 
   if (r.post_delay_ms) adimlar.push(`${r.post_delay_ms} ms bekle`);
   if (r.retract && r.go_to_plant) adimlar.push("ucu güvenli yüksekliğe çek");
@@ -235,7 +268,8 @@ function onizleme(
   return adimlar;
 }
 
-function toplamSure(r: IrrigationRecipe): number {
+function toplamSure(r: IrrigationRecipe, vanaVar: boolean): number {
   const arada = r.water_ms > 0 && r.air_ms > 0 ? r.between_ms : 0;
-  return r.pre_delay_ms + r.water_ms + arada + r.air_ms + r.post_delay_ms;
+  const vana = vanaVar && r.water_ms > 0 ? r.valve_lead_ms + r.valve_lag_ms : 0;
+  return r.pre_delay_ms + vana + r.water_ms + arada + r.air_ms + r.post_delay_ms;
 }

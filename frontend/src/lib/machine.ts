@@ -147,6 +147,10 @@ export interface IrrigationRecipe {
   retract: boolean;
   water_first: boolean;
   pre_delay_ms: number;
+  /** Vana açıldıktan sonra pompayı bekletme. */
+  valve_lead_ms: number;
+  /** Pompa durduktan sonra vanayı kapatmadan bekletme. */
+  valve_lag_ms: number;
   water_ms: number;
   between_ms: number;
   /** 0 = hava pompası hiç çalışmasın. */
@@ -160,6 +164,8 @@ export const IRRIGATION_DEFAULTS: IrrigationRecipe = {
   retract: true,
   water_first: true,
   pre_delay_ms: 0,
+  valve_lead_ms: 1000,
+  valve_lag_ms: 500,
   water_ms: 3000,
   between_ms: 1000,
   air_ms: 0,
@@ -383,6 +389,8 @@ function readIrrigation(raw: unknown): IrrigationRecipe {
     retract: o.retract !== false,
     water_first: o.water_first !== false,
     pre_delay_ms: num(o.pre_delay_ms, 0),
+    valve_lead_ms: num(o.valve_lead_ms, IRRIGATION_DEFAULTS.valve_lead_ms),
+    valve_lag_ms: num(o.valve_lag_ms, IRRIGATION_DEFAULTS.valve_lag_ms),
     water_ms: num(o.water_ms, IRRIGATION_DEFAULTS.water_ms),
     between_ms: num(o.between_ms, IRRIGATION_DEFAULTS.between_ms),
     air_ms: num(o.air_ms, 0),

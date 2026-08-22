@@ -150,15 +150,20 @@ SEEDER_DEFAULTS: dict[str, Any] = {
 # `air_ms = 0` hava pompasının hiç çalışmaması demek — ayrı bir "kapalı"
 # bayrağı koymak, sıfır süreyle aynı şeyi iki türlü anlatmak olurdu.
 IRRIGATION_DEFAULTS: dict[str, Any] = {
-    "go_to_plant": True,    # bitkinin üstüne git; kapalıysa olduğu yerde sular
-    "descend": True,        # toprağa in; kapalıysa güvenli yükseklikte kalır
-    "pre_delay_ms": 0,      # varınca, pompadan önce bekleme
-    "water_first": True,    # önce su mu hava mı
-    "water_ms": 3000,       # su pompası süresi
-    "between_ms": 1000,     # iki pompa arası bekleme
-    "air_ms": 0,            # hava pompası süresi (0 = çalışmasın)
-    "post_delay_ms": 0,     # pompalar bitince bekleme
-    "retract": True,        # bitince ucu güvenli yüksekliğe çek
+    "go_to_plant": True,     # bitkinin üstüne git; kapalıysa olduğu yerde sular
+    "descend": True,         # toprağa in; kapalıysa güvenli yükseklikte kalır
+    "pre_delay_ms": 0,       # varınca, ilk komuttan önce bekleme
+    # Vana su hattında; pompadan ÖNCE açılıp SONRA kapanıyor. Pompayı kapalı
+    # vanaya karşı çalıştırmak hattı zorlar, kapanmadan önce beklememek de
+    # hatta basınç hapseder.
+    "valve_lead_ms": 1000,   # vana açıldıktan sonra pompayı beklet
+    "valve_lag_ms": 500,     # pompa durduktan sonra vanayı kapatmadan beklet
+    "water_first": True,     # önce su mu hava mı
+    "water_ms": 3000,        # su pompası süresi
+    "between_ms": 1000,      # su ile hava arası bekleme
+    "air_ms": 0,             # hava pompası süresi (0 = çalışmasın)
+    "post_delay_ms": 0,      # her şey bitince bekleme
+    "retract": True,         # bitince ucu güvenli yüksekliğe çek
 }
 
 VIEWER_DEFAULTS: dict[str, Any] = {
@@ -473,6 +478,10 @@ def normalize_irrigation(raw: Any) -> dict[str, Any]:
         "water_first": source.get("water_first") is not False,
         "retract": source.get("retract") is not False,
         "pre_delay_ms": int(_number(source.get("pre_delay_ms"), 0.0, span=(0, 60000))),
+        "valve_lead_ms": int(
+            _number(source.get("valve_lead_ms"), 1000.0, span=(0, 60000))
+        ),
+        "valve_lag_ms": int(_number(source.get("valve_lag_ms"), 500.0, span=(0, 60000))),
         "water_ms": int(_number(source.get("water_ms"), 3000.0, span=(0, 600000))),
         "between_ms": int(_number(source.get("between_ms"), 1000.0, span=(0, 60000))),
         "air_ms": int(_number(source.get("air_ms"), 0.0, span=(0, 600000))),

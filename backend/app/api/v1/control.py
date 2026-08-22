@@ -208,8 +208,10 @@ async def water_point(
             ),
         )
 
-    # Hava pompası isteğe bağlı; tanımlı değilse reçetedeki adımı üretmiyoruz
+    # Hava pompası ve vana isteğe bağlı; tanımlı değillerse reçetedeki
+    # adımları hiç üretmiyoruz
     hava = await _pompa_bul(db, device.id, PeripheralRole.AIR_PUMP)
+    vana = await _pompa_bul(db, device.id, PeripheralRole.VALVE)
 
     body = commands.sulama_recetesi(
         x=point.x,
@@ -219,6 +221,7 @@ async def water_point(
         recete=recete,
         water_pin=pump_pin,
         air_pin=hava.pin if hava else None,
+        valve_pin=vana.pin if vana else None,
         speed=payload.speed,
     )
     await gunluk.yaz(
