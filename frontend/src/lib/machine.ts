@@ -213,7 +213,34 @@ export interface MachineConfig {
   species: Record<string, SpeciesOverride>;
   irrigation: IrrigationRecipe;
   probe: ProbeConfig;
+  camera: CameraConfig;
 }
+
+/**
+ * Kamera görüntüsünün yönelimi.
+ *
+ * Kamera nasıl monte edildiyse görüntü ters ya da ayna gelebiliyor; robotun
+ * üstüne baş aşağı asılması yaygın.
+ *
+ * `rotation` yalnızca 0 ve 180 olabilir — `rpicam-still --rotation` başkasını
+ * kabul etmiyor. Gerçek 90/270 için kareyi çekimden sonra döndürmek, yani
+ * ajana bir görüntü kütüphanesi eklemek gerekirdi; ajan bilinçli olarak üç
+ * bağımlılıkla sınırlı. Aynalamayla birlikte bu üçlü montaj durumlarını
+ * karşılıyor.
+ */
+export interface CameraConfig {
+  rotation: 0 | 180;
+  /** Yatay aynala (`--hflip`). */
+  hflip: boolean;
+  /** Dikey çevir (`--vflip`). */
+  vflip: boolean;
+}
+
+export const CAMERA_DEFAULTS: CameraConfig = {
+  rotation: 0,
+  hflip: false,
+  vflip: false,
+};
 
 export const SEEDER_DEFAULTS: SeederConfig = {
   enabled: false,
@@ -321,6 +348,7 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
   const rawViewer = (source.viewer ?? {}) as Record<string, unknown>;
   const rawArea = (source.planting_area ?? {}) as Record<string, unknown>;
   const rawSeeder = (source.seeder ?? {}) as Record<string, unknown>;
+  const rawCamera = (source.camera ?? {}) as Record<string, unknown>;
 
   return {
     limits_enabled: source.limits_enabled !== false,
@@ -399,6 +427,11 @@ export function readMachineConfig(settings: Record<string, unknown> | undefined)
       font_scale: num(rawViewer.font_scale, VIEWER_DEFAULTS.font_scale),
       show_grid: rawViewer.show_grid !== false,
       show_labels: rawViewer.show_labels !== false,
+    },
+    camera: {
+      rotation: rawCamera.rotation === 180 || rawCamera.rotation === "180" ? 180 : 0,
+      hflip: rawCamera.hflip === true,
+      vflip: rawCamera.vflip === true,
     },
     planting_area: {
       x_min_mm: optionalNum(rawArea.x_min_mm),

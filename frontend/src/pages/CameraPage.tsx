@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { Camera, Trash2, ImageOff, RefreshCw, Video, VideoOff } from "lucide-react";
+import { Camera, Trash2, ImageOff, RefreshCw, RotateCw, Video, VideoOff } from "lucide-react";
 
 import {
   Badge,
@@ -9,12 +9,14 @@ import {
   CardHeader,
   EmptyState,
   PageHeader,
+  Toggle,
 } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
-import type { CapturedImage } from "@/lib/types";
+import { readMachineConfig, type CameraConfig } from "@/lib/machine";
+import type { CapturedImage, Device } from "@/lib/types";
 
 export default function CameraPage() {
   const deviceId = useDeviceId();
@@ -164,6 +166,8 @@ export default function CameraPage() {
         </div>
       </Card>
 
+      {device && <YonelimKarti device={device} />}
+
       <Card>
         <CardHeader
           title="Fotoğraf Galerisi"
@@ -305,5 +309,80 @@ function GalleryImage({
       loading="lazy"
       className="aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-105"
     />
+  );
+}
+
+/**
+ * Görüntü yönelimi.
+ *
+ * Kamera nasıl monte edildiyse görüntü ters ya da ayna gelebiliyor; robotun
+ * üstüne baş aşağı asmak yaygın bir durum.
+ *
+ * Ayar cihaz kaydına yazılıyor, backend bunu `config` mesajıyla ajana iletiyor
+ * ve ajan çekim komutuna bayrak olarak ekliyor. Yani değişiklik bir sonraki
+ * fotoğrafta geçerli — ajanı yeniden başlatmak gerekmiyor.
+ *
+ * Kontrol bilerek Kamera sayfasında: doğru yönelim deneme yanılmayla bulunuyor
+ * ve değiştirip çekip sonucu aynı ekranda görmek gerekiyor.
+ */
+function YonelimKarti({ device }: { device: Device }) {
+  const queryClient = useQueryClient();
+  const camera = readMachineConfig(device.settings).camera;
+
+  const kaydet = useMutation({
+    mutationFn: (next: CameraConfig) =>
+      api.devices.update(device.id, { settings: { ...device.settings, camera: next } }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["device", device.id] });
+      void queryClient.invalidateQueries({ queryKey: ["devices"] });
+      toast.success("Yönelim kaydedildi — sonraki fotoğrafta geçerli");
+    },
+    onError: () => toast.error("Yönelim kaydedilemedi"),
+  });
+
+  // Ayrı bir "Kaydet" düğmesi yok: doğru yönelim deneyerek bulunuyor ve her
+  // denemede iki tıklama istemek akışı bozardı.
+  const degistir = (yama: Partial<CameraConfig>) => kaydet.mutate({ ...camera, ...yama });
+
+  return (
+    <Card>
+      <CardHeader
+        title="Görüntü Yönelimi"
+        subtitle="Kamera ters ya da ayna monte edildiyse buradan düzeltin"
+        icon={<RotateCw className="size-4" />}
+      />
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted">Döndür</span>
+          {([0, 180] as const).map((derece) => (
+            <Button
+              key={derece}
+              size="sm"
+              variant={camera.rotation === derece ? "primary" : "secondary"}
+              onClick={() => degistir({ rotation: derece })}
+              disabled={kaydet.isPending}
+            >
+              {derece}°
+            </Button>
+          ))}
+        </div>
+        <Toggle
+          checked={camera.hflip}
+          onChange={(acik) => degistir({ hflip: acik })}
+          label="Yatay aynala"
+          disabled={kaydet.isPending}
+        />
+        <Toggle
+          checked={camera.vflip}
+          onChange={(acik) => degistir({ vflip: acik })}
+          label="Dikey çevir"
+          disabled={kaydet.isPending}
+        />
+      </div>
+      <p className="mt-3 text-xs text-subtle">
+        90° ve 270° yok — kameranın çekim aracı yalnızca 0 ve 180 destekliyor.
+        Yan monte edilmiş bir kamera için aynalama seçenekleriyle deneyin.
+      </p>
+    </Card>
   );
 }

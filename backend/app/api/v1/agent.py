@@ -451,6 +451,10 @@ def _agent_config(device: Device, machine: dict) -> dict:
                 else None
             ),
         },
+        # Görüntü yönelimi. Ajan bunu çekim komutuna bayrak olarak ekliyor,
+        # dolayısıyla panelde değiştirmek yeniden başlatma gerektirmiyor —
+        # eksen kalibrasyonuyla aynı yol.
+        "camera": machine["camera"],
     }
 
 

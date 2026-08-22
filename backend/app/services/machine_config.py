@@ -401,6 +401,27 @@ def normalize_viewer(raw: Any) -> dict[str, Any]:
     }
 
 
+def normalize_camera(raw: Any) -> dict[str, Any]:
+    """Kamera görüntüsünün yönelimi.
+
+    Kamera fiziksel olarak nasıl monte edildiyse görüntü ona göre ters ya da
+    ayna gelebiliyor; robotun üstüne baş aşağı asılması yaygın bir durum.
+
+    `rotation` yalnızca 0 ve 180 kabul ediyor — `rpicam-still --rotation`
+    başkasını desteklemiyor. Gerçek 90/270 için kareyi çekimden sonra
+    döndürmek, yani ajana bir görüntü kütüphanesi eklemek gerekirdi; ajan
+    bilinçli olarak üç bağımlılıkla sınırlı tutuluyor. Aynalama ile birlikte
+    bu üçlü pratikteki montaj durumlarını karşılıyor.
+    """
+    source = raw if isinstance(raw, dict) else {}
+    rotation = source.get("rotation")
+    return {
+        "rotation": 180 if rotation in (180, "180") else 0,
+        "hflip": bool(source.get("hflip", False)),
+        "vflip": bool(source.get("vflip", False)),
+    }
+
+
 def _optional_number(
     value: Any, *, span: tuple[float, float] = (-1e6, 1e6)
 ) -> float | None:
@@ -563,6 +584,7 @@ def normalize(settings: Any) -> dict[str, Any]:
     source["species"] = normalize_species(source.get("species"))
     source["irrigation"] = normalize_irrigation(source.get("irrigation"))
     source["probe"] = normalize_probe(source.get("probe"))
+    source["camera"] = normalize_camera(source.get("camera"))
     return source
 
 
