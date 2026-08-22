@@ -99,6 +99,32 @@ async def list_images(
     )
 
 
+@router.delete("/images/{image_id}", response_model=Message)
+async def delete_image(
+    image_id: uuid.UUID, device: OwnedDevice, db: DbSession
+) -> Message:
+    """Tek bir kareyi siler.
+
+    Cihaz kontrolü sorguya gömülü: başka bir kullanıcının cihazına ait bir
+    kimlik gönderilse bile hiçbir satır eşleşmiyor ve 404 dönüyor.
+    """
+    result = await db.execute(
+        delete(Image).where(Image.id == image_id, Image.device_id == device.id)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Fotoğraf bulunamadı")
+    await db.commit()
+    return Message(detail="Fotoğraf silindi")
+
+
+@router.delete("/images", response_model=Message)
+async def clear_images(device: OwnedDevice, db: DbSession) -> Message:
+    """Cihazın tüm karelerini siler."""
+    result = await db.execute(delete(Image).where(Image.device_id == device.id))
+    await db.commit()
+    return Message(detail=f"{result.rowcount} fotoğraf silindi")
+
+
 # --------------------------------------------------------------------------- #
 # Fotoğraf dosyası
 # --------------------------------------------------------------------------- #

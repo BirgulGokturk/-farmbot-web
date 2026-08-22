@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Camera, ImageOff, RefreshCw, Video, VideoOff } from "lucide-react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { Camera, Trash2, ImageOff, RefreshCw, Video, VideoOff } from "lucide-react";
 
 import {
   Badge,
@@ -33,6 +33,24 @@ export default function CameraPage() {
   });
 
   const streamUrl = device?.camera_stream_url;
+
+  const sil = useMutation({
+    mutationFn: (imageId: string) => api.images.remove(deviceId!, imageId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["images", deviceId] });
+      toast.success("Fotoğraf silindi");
+    },
+    onError: (error) => toast.error("Silinemedi", (error as Error).message),
+  });
+
+  const hepsiniSil = useMutation({
+    mutationFn: () => api.images.clear(deviceId!),
+    onSuccess: (sonuc) => {
+      void queryClient.invalidateQueries({ queryKey: ["images", deviceId] });
+      toast.success(sonuc.detail);
+    },
+    onError: (error) => toast.error("Silinemedi", (error as Error).message),
+  });
 
   async function capture() {
     if (!deviceId) return;
@@ -151,14 +169,45 @@ export default function CameraPage() {
           title="Fotoğraf Galerisi"
           subtitle={`${images?.total ?? 0} kayıt`}
           icon={<Camera className="size-4" />}
+          action={
+            images?.items.length ? (
+              <Button
+                size="sm"
+                variant="danger"
+                icon={<Trash2 className="size-3.5" />}
+                loading={hepsiniSil.isPending}
+                onClick={() => {
+                  // Geri alınamayan bir işlem; onay istemek burada abartı değil
+                  if (window.confirm(`${images.total} fotoğrafın hepsi silinsin mi?`)) {
+                    hepsiniSil.mutate();
+                  }
+                }}
+              >
+                Tümünü sil
+              </Button>
+            ) : undefined
+          }
         />
         {images?.items.length ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {images.items.map((image) => (
               <figure
                 key={image.id}
-                className="group overflow-hidden rounded-xl border border-line bg-surface-2"
+                className="group relative overflow-hidden rounded-xl border border-line bg-surface-2"
               >
+                {/* Fareyle üstüne gelince beliriyor: her karenin üstünde
+                    duran bir çöp kutusu galeriyi kalabalıklaştırırdı.
+                    Dokunmatik cihazlarda `focus-within` ile de açılıyor. */}
+                <button
+                  type="button"
+                  aria-label="Bu fotoğrafı sil"
+                  disabled={sil.isPending}
+                  className="absolute right-1.5 top-1.5 z-10 rounded-lg bg-surface/85 p-1.5 text-danger opacity-0 backdrop-blur transition group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-danger/15 focus:opacity-100"
+                  onClick={() => sil.mutate(image.id)}
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+
                 <GalleryImage
                   deviceId={deviceId!}
                   image={image}

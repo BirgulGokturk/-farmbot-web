@@ -532,6 +532,12 @@ export const api = {
     /** Karenin kendisi. Kimlik doğrulaması gerektiği için blob olarak iniyor. */
     file: (deviceId: string, imageId: string) =>
       requestBlob(`/devices/${deviceId}/images/${imageId}/file`),
+    remove: (deviceId: string, imageId: string) =>
+      request<{ detail: string }>(`/devices/${deviceId}/images/${imageId}`, {
+        method: "DELETE",
+      }),
+    clear: (deviceId: string) =>
+      request<{ detail: string }>(`/devices/${deviceId}/images`, { method: "DELETE" }),
   },
 
   /** Robotu doğrudan süren komutlar. */
