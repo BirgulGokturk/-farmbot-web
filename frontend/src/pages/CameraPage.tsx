@@ -15,7 +15,7 @@ import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
-import { readMachineConfig, type CameraConfig } from "@/lib/machine";
+import { CAMERA_DEFAULTS, readMachineConfig, type CameraConfig } from "@/lib/machine";
 import type { CapturedImage, Device } from "@/lib/types";
 
 export default function CameraPage() {
@@ -35,6 +35,22 @@ export default function CameraPage() {
   });
 
   const streamUrl = device?.camera_stream_url;
+
+  /**
+   * Canlı akışa uygulanacak CSS dönüşümü — kaynağı fotoğrafla aynı ayar.
+   *
+   * Yalnızca 180° dönüş ve aynalama var; hiçbiri en-boy oranını değiştirmediği
+   * için `object-contain` ile çakışmıyor. 90/270 olsaydı kutu oranını da
+   * çevirmek gerekirdi.
+   */
+  const kamera = device ? readMachineConfig(device.settings).camera : CAMERA_DEFAULTS;
+  const akisDonusumu = [
+    kamera.rotation ? `rotate(${kamera.rotation}deg)` : "",
+    kamera.hflip ? "scaleX(-1)" : "",
+    kamera.vflip ? "scaleY(-1)" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const sil = useMutation({
     mutationFn: (imageId: string) => api.images.remove(deviceId!, imageId),
@@ -151,6 +167,20 @@ export default function CameraPage() {
               src={`${streamUrl}${streamUrl.includes("?") ? "&" : "?"}t=${streamKey}`}
               alt="Robot kamerası canlı görüntüsü"
               className="size-full object-contain"
+              /*
+               * Yönelim akışa tarayıcıda uygulanıyor.
+               *
+               * Canlı akış ajandan geçmiyor — Pi'de ayrı bir video sunucusu
+               * üretiyor ve ona bayrak geçiremiyoruz. CSS ile çevirmek, akışı
+               * neyin sunduğundan bağımsız çalışıyor ve tek ayarın hem
+               * fotoğrafı hem canlı görüntüyü çevirmesini sağlıyor.
+               *
+               * Sıra derdi yok: rotate180/hflip/vflip değişmeli bir grup
+               * oluşturuyor, dolayısıyla CSS'in sağdan sola uyguladığı sıra
+               * rpicam-still'inkiyle aynı sonucu veriyor — akış ile fotoğraf
+               * birbirini tutuyor.
+               */
+              style={akisDonusumu ? { transform: akisDonusumu } : undefined}
               onError={() => toast.error("Akışa bağlanılamadı", "Kamera adresini Ayarlar'dan kontrol edin.")}
             />
           ) : (
@@ -348,7 +378,7 @@ function YonelimKarti({ device }: { device: Device }) {
     <Card>
       <CardHeader
         title="Görüntü Yönelimi"
-        subtitle="Kamera ters ya da ayna monte edildiyse buradan düzeltin"
+        subtitle="Canlı akışa ve çekilen fotoğraflara birlikte uygulanır"
         icon={<RotateCw className="size-4" />}
       />
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
@@ -380,8 +410,9 @@ function YonelimKarti({ device }: { device: Device }) {
         />
       </div>
       <p className="mt-3 text-xs text-subtle">
-        90° ve 270° yok — kameranın çekim aracı yalnızca 0 ve 180 destekliyor.
-        Yan monte edilmiş bir kamera için aynalama seçenekleriyle deneyin.
+        Canlı akış tarayıcıda çevriliyor, fotoğraf ise robotta — ikisi aynı
+        ayarı kullandığı için sonuç birbirini tutar. 90° ve 270° yok: çekim
+        aracı yalnızca 0 ve 180 destekliyor.
       </p>
     </Card>
   );
