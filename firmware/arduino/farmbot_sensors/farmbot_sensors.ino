@@ -53,19 +53,19 @@ Servo tarimServo;
 // kuruyken ve üstüne birkaç damla su damlattığında okunan değerlerin
 // ortasını buraya yaz.
 /*
- * Yağmur eşiği — ham ADC değeri bunun ÜSTÜNDEYSE "ıslak" sayılıyor.
+ * Yağmur eşiği — ham ADC değeri bunun ALTINDAYSA "ıslak" sayılıyor.
  *
- * Yön sahada ölçülerek bulundu: bu sensör kuruyken **286**, ıslakken **500**
- * okuyor. Yani su değdikçe değer YÜKSELİYOR. Eskizin ilk sürümü tersini
- * varsayıyordu (`ham < eşik → ıslak`) ve bu yüzden kuru sensörde bile sürekli
- * "yağmur var" deyip vanayı açıyordu.
+ * Sahada ölçüldü: sensör kuruyken ~990, ıslakken ~240. Yani su değdikçe
+ * değer DÜŞÜYOR ve eşik ikisinin ortası: (990 + 240) / 2 = 615.
  *
- * Eşik iki ucun ortası: (286 + 500) / 2 ≈ 393.
+ * Bir ara bunun tersini yazmıştım. Sebebi şuydu: sensör o sırada RX0'a
+ * bağlıydı ve A0 boştaydı; boştaki pin yanındaki kanalın değerini kaptığı
+ * için "kuru 286, ıslak 500" gibi anlamsız sayılar ölçmüştük. Sensör A0'a
+ * alınınca gerçek davranış ortaya çıktı ve ilk yön doğru çıktı.
  *
- * `ESIK <sayi>` komutuyla çalışırken değiştirilebiliyor; her denemede eskizi
- * yeniden yüklemek gerekmiyor.
+ * `ESIK <sayi>` komutuyla çalışırken değiştirilebiliyor.
  */
-int suEsikDegeri = 393;
+int suEsikDegeri = 615;
 
 /*
  * Histerezis — kararın sınırda titrememesi için.
@@ -112,8 +112,10 @@ bool pompaSuAcik = false;
 // Kalibrasyon: probu havada tutunca okunan değer -> TOPRAK_KURU,
 // suya batırınca okunan -> TOPRAK_ISLAK. Panelde "Toprak (ham)" grafiğinden
 // okuyup buraya yaz.
-const int TOPRAK_KURU  = 620;
-const int TOPRAK_ISLAK = 260;
+// Sahada ölçüldü: prob havadayken ~1020, suya batırılınca ~330.
+// Önceki 620/260 tahmindi ve yüzdeyi sürekli %0 gösteriyordu.
+const int TOPRAK_KURU  = 1020;
+const int TOPRAK_ISLAK = 330;
 
 // --- DURUM ---
 bool barometreVar = false;   // Barometre bulunamazsa diğer sensörler çalışmaya devam etsin
@@ -458,9 +460,11 @@ int toprakOku() {
  * altına inmeden "kuru" demiyoruz. Arada kalan bölgede son karar korunuyor.
  */
 void islaklikGuncelle(int ham) {
-  if (!islakMi && ham > suEsikDegeri + ESIK_HISTEREZIS) {
+  // Islak = DÜŞÜK değer. Islak demek için eşiğin belirgin şekilde altına
+  // inmek, kuru demek için belirgin şekilde üstüne çıkmak gerekiyor.
+  if (!islakMi && ham < suEsikDegeri - ESIK_HISTEREZIS) {
     islakMi = true;
-  } else if (islakMi && ham < suEsikDegeri - ESIK_HISTEREZIS) {
+  } else if (islakMi && ham > suEsikDegeri + ESIK_HISTEREZIS) {
     islakMi = false;
   }
 }
