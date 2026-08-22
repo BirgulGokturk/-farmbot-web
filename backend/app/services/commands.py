@@ -185,7 +185,7 @@ def toprak_olc(
     safe_z: float,
     *,
     depth_mm: float,
-    pin: int,
+    pin: int | None = None,
     mode: int = 1,
     label: str = "toprak_nemi",
     settle_ms: int = 2000,
@@ -203,14 +203,29 @@ def toprak_olc(
 
     Neden sonunda çekiliyor: prob toprakta kalırsa bir sonraki yatay hareket
     onu toprağın içinden sürükler.
+
+    `pin` neden isteğe bağlı
+    ------------------------
+    İki tür sensör var ve ölçüm ikisinde farklı yoldan geliyor:
+
+      * **Pinli** — panel "şu pini oku" diyor, değer o anda dönüyor.
+      * **Kanallı** — Arduino kendi döngüsünde sürekli okuyup seri porttan
+        yayınlıyor (`soil_moisture` böyle). Ona `read_pin` göndermenin
+        karşılığı yok; ajan zaten iki saniyede bir ölçüm gönderiyor ve her
+        ölçüm alındığı andaki konumla damgalanıyor.
+
+    Kanallı sensörde dizi yalnızca robotu doğru noktada, doğru derinlikte ve
+    yeterince uzun tutuyor — ölçüm kendiliğinden o noktaya yazılıyor.
     """
-    return [
+    adimlar = [
         move_absolute(x, y, safe_z, speed),          # güvenli yükseklikte yatayda git
         move_absolute(x, y, soil_z - depth_mm, speed),  # toprağa bat
         wait(settle_ms),                             # okuma dengelensin
-        read_pin(pin, mode, label),
-        move_absolute(x, y, safe_z, speed),          # probu topraktan çek
     ]
+    if pin is not None:
+        adimlar.append(read_pin(pin, mode, label))
+    adimlar.append(move_absolute(x, y, safe_z, speed))  # probu topraktan çek
+    return adimlar
 
 
 def sulama_recetesi(

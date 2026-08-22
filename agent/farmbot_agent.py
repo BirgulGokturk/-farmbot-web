@@ -326,6 +326,10 @@ class Agent:
         # Kamera isteğe bağlı: takılı değilse ajan sensör ve hareket köprüsü
         # olarak çalışmaya devam eder
         self.camera_command = camera_command
+        # Görüntü yönelimi panelden geliyor (`config` mesajı). Komuta gömmek
+        # yerine ayrı tutuluyor ki ayar değişince ajanı yeniden başlatmadan
+        # devreye girsin.
+        self.camera_transform: dict[str, Any] = {"rotation": 0, "hflip": False, "vflip": False}
         # Yenilenen token'ın yazılacağı yer; main_async dolduruyor
         self.token_file: Path | None = None
         self.token_rotate_days: int = 30
@@ -336,6 +340,14 @@ class Agent:
         # yalnızca sensör köprüsü olarak çalışmaya devam eder
         self.gantry = gantry
         self.buffer: deque[dict[str, Any]] = deque(maxlen=MAX_BUFFER)
+        # Ölçüm alındığı **anda** robotun neredeydi.
+        #
+        # Ölçümler 15 saniyede bir toplu gönderiliyor ve sunucu, konum
+        # gelmediğinde cihazın **o anki** konumunu yazıyordu. Robot bu arada
+        # başka bir noktaya gitmişse ölçüm yanlış yere işaretleniyor: ısı
+        # haritası kaymış çıkıyor, "şu noktanın nemi" sorusu da yanlış
+        # cevaplanıyor. Kaymanın belirtisi yok — sayı makul görünüyor.
+        self.son_konum: dict[str, float] | None = None
         self.dropped = 0
         self.sent = 0
         # Seri porta gönderilen komutların yanıtını bekleyenler
@@ -378,15 +390,23 @@ class Agent:
 
     def _buffer_readings(self, readings: dict[str, Any]) -> None:
         timestamp = datetime.now(timezone.utc).isoformat()
+        # Konum ölçümle **birlikte** kaydediliyor; gönderim sırasında değil.
+        # Aradaki 15 saniyede robot başka bir noktaya gitmiş olabilir.
+        konum = self.son_konum
         for channel, value in readings.items():
             if not isinstance(value, (int, float)):
                 continue
             if len(self.buffer) == self.buffer.maxlen:
                 # deque dolduğunda en eskisi düşer; kullanıcıyı bilgilendir
                 self.dropped += 1
-            self.buffer.append(
-                {"channel": channel, "value": float(value), "read_at": timestamp}
-            )
+            kayit: dict[str, Any] = {
+                "channel": channel,
+                "value": float(value),
+                "read_at": timestamp,
+            }
+            if konum is not None:
+                kayit.update(konum)
+            self.buffer.append(kayit)
 
     def _resolve_ack(self, payload: dict[str, Any]) -> None:
         """Arduino komut onayı.
@@ -525,6 +545,14 @@ class Agent:
             # bekliyordu ama hiç göndermiyorduk, kart boş duruyordu.
             tree["informational_settings"].update(telemetri.topla())
             position = tree["location_data"]["position"]
+            # Sensör ölçümleri bu konumla damgalanıyor. Durum döngüsü zaten
+            # saniyede birkaç kez çalışıyor; ayrıca konum sormak PLC'yi boşuna
+            # meşgul ederdi.
+            self.son_konum = {
+                "x": float(position["x"]),
+                "y": float(position["y"]),
+                "z": float(position["z"]),
+            }
             # Konumu 0.1 mm çözünürlükte imzala: gürültüden dolayı sürekli
             # mesaj gitmesin
             signature = "{:.1f}|{:.1f}|{:.1f}|{}|{}".format(
@@ -561,6 +589,21 @@ class Agent:
         if kind == "config":
             payload = message.get("payload") or {}
             await self._maybe_rotate_token(payload.get("token_age_days"))
+
+            camera = payload.get("camera")
+            if isinstance(camera, dict):
+                self.camera_transform = {
+                    "rotation": 180 if camera.get("rotation") == 180 else 0,
+                    "hflip": bool(camera.get("hflip")),
+                    "vflip": bool(camera.get("vflip")),
+                }
+                logger.info(
+                    "Kamera yönelimi: %d° %s%s",
+                    self.camera_transform["rotation"],
+                    "· yatay ayna " if self.camera_transform["hflip"] else "",
+                    "· dikey çevir" if self.camera_transform["vflip"] else "",
+                )
+
             if self.gantry is not None:
                 self.gantry.calibration.update(payload.get("axes"))
                 self.gantry.calibration.limits_enabled = payload.get("limits_enabled") is not False
@@ -797,9 +840,10 @@ class Agent:
                 "ya da --no-camera ile bu komutu kapatın."
             )
 
-        logger.info("Fotoğraf çekiliyor: %s", " ".join(self.camera_command))
+        argv = self._camera_argv()
+        logger.info("Fotoğraf çekiliyor: %s", " ".join(argv))
         process = await asyncio.create_subprocess_exec(
-            *self.camera_command,
+            *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -823,6 +867,27 @@ class Agent:
             len(data) // 1024,
             f", {result['discarded']} eski kare silindi" if result.get("discarded") else "",
         )
+
+    def _camera_argv(self) -> list[str]:
+        """Çekim komutuna panelden gelen yönelim bayraklarını ekler.
+
+        Bayraklar sona ekleniyor; `rpicam-still` seçenek sırasına duyarlı değil.
+
+        Kullanıcı `--camera-cmd` ile kendi komutunda zaten bir yönelim bayrağı
+        verdiyse ona dokunmuyoruz. Açıkça yazılmış bir seçeneği panel ayarıyla
+        ezmek, "komut satırında yazdığımı neden dikkate almıyor" sorusuna yol
+        açardı; ayrıca aynı seçeneği iki kez vermek komutu hata ile bitirir.
+        """
+        argv = list(self.camera_command or [])
+        transform = self.camera_transform
+
+        if transform["rotation"] and not any(a.startswith("--rotation") for a in argv):
+            argv += ["--rotation", str(transform["rotation"])]
+        if transform["hflip"] and "--hflip" not in argv:
+            argv.append("--hflip")
+        if transform["vflip"] and "--vflip" not in argv:
+            argv.append("--vflip")
+        return argv
 
     async def _send_arduino(self, command: str, timeout: float = 5.0) -> dict[str, Any]:
         """Komutu gönderir ve Arduino'nun onayını bekler."""

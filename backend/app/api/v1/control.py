@@ -37,6 +37,11 @@ from app.services.mqtt import RpcError, RpcTimeoutError
 
 router = APIRouter(prefix="/devices/{device_id}/control", tags=["Kontrol"])
 
+# Arduino sensör verisini kendi döngüsünde bu aralıkla yayınlıyor
+# (firmware/arduino/farmbot_sensors, döngü sonundaki `delay(2000)`).
+# Kanallı bir sensörden ölçüm beklerken prob toprakta bundan uzun kalmalı.
+ARDUINO_YAYIN_MS = 2000
+
 
 async def _dispatch(
     device: Device,
@@ -618,16 +623,22 @@ async def spot_task(
                     "kanalı 'toprak nemi' olan bir sensör tanımlayın."
                 ),
             )
-        if sensor.pin is None:
-            raise HTTPException(
-                422,
-                detail=f"'{sensor.label}' bir pine bağlı değil; okunamaz.",
-            )
-
+        # Pin yoksa bu bir **kanallı** sensör: Arduino kendi döngüsünde okuyup
+        # sürekli yayınlıyor. Reddetmek yanlıştı — sahadaki toprak nemi
+        # sensörü tam olarak böyle çalışıyor ve "bir pine bağlı değil" hatası
+        # doğru kurulmuş bir donanımı arızalı gibi gösteriyordu.
         prob = ayarlar["probe"]
         derinlik = payload.probe_depth_mm
         if derinlik is None:
             derinlik = float(prob["depth_mm"])
+
+        # Kanallı sensörden okuma isteyemiyoruz; ölçümün kendiliğinden
+        # gelmesini bekliyoruz. Arduino iki saniyede bir yayın yapıyor, bu
+        # yüzden prob toprakta en az bir tur kalmalı — yoksa o noktaya ait
+        # hiçbir ölçüm oluşmaz ve komut sessizce hiçbir şey üretmez.
+        bekleme = int(prob["settle_ms"])
+        if sensor.pin is None:
+            bekleme = max(bekleme, ARDUINO_YAYIN_MS * 2)
 
         body = hazirla("soil_probe") + commands.toprak_olc(
             x=payload.x,
@@ -635,10 +646,10 @@ async def spot_task(
             soil_z=device.soil_height_mm,
             safe_z=device.safe_height_mm,
             depth_mm=derinlik,
-            pin=sensor.pin,
+            pin=sensor.pin,          # None ise okuma adımı üretilmiyor
             mode=sensor.mode,
             label=sensor.channel or sensor.label,
-            settle_ms=int(prob["settle_ms"]),
+            settle_ms=bekleme,
             speed=hiz,
         )
         ozet = gunluk.ozet(

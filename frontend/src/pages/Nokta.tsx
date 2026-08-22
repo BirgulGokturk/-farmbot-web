@@ -60,6 +60,13 @@ interface IsTanimi {
   gorev: "seeder" | "waterer" | "soil_probe";
 }
 
+/**
+ * Arduino sensör verisini kendi döngüsünde bu aralıkla yayınlıyor.
+ * Sunucudaki `ARDUINO_YAYIN_MS` ile aynı sayı: önizlemenin gösterdiği süre,
+ * robotun gerçekten bekleyeceği süre olmalı.
+ */
+const ARDUINO_YAYIN_MS = 2000;
+
 const ISLER: IsTanimi[] = [
   {
     value: "sow",
@@ -310,10 +317,18 @@ export default function Nokta() {
                     </option>
                   </Select>
                 )}
-                <p className="mt-1 text-xs text-subtle">
+                <p className="mt-1 text-xs leading-relaxed text-subtle">
                   Yüzeyde tutulan bir okuma havayı ölçer; prob bu yüzden
                   batırılıyor ve okumadan önce{" "}
                   {(config.probe.settle_ms / 1000).toFixed(1)} sn bekleniyor.
+                  {toprakSensoru && toprakSensoru.pin == null && (
+                    <>
+                      {" "}
+                      Bu sensör bir pine bağlı değil — Arduino ölçümü kendi
+                      döngüsünde yayınlıyor, robot yalnızca noktada bekliyor ve
+                      ölçüm o konuma yazılıyor.
+                    </>
+                  )}
                 </p>
               </div>
             )}
@@ -348,9 +363,13 @@ export default function Nokta() {
                 suSuresi: sure ?? config.irrigation.water_ms,
                 havaSuresi: config.irrigation.air_ms,
                 probDerinlik: probDerinlik ?? config.probe.depth_mm,
-                bekleme: config.probe.settle_ms,
+                bekleme: Math.max(
+                  config.probe.settle_ms,
+                  toprakSensoru?.pin == null ? ARDUINO_YAYIN_MS * 2 : 0,
+                ),
                 suPin: suPompasi?.pin ?? null,
                 sensorAdi: toprakSensoru?.label ?? null,
+                sensorPinli: toprakSensoru?.pin != null,
               }).map((satir, i) => (
                 <li key={i}>
                   {i + 1}. {satir}
@@ -439,6 +458,8 @@ interface OnizlemeGirdisi {
   bekleme: number;
   suPin: number | null;
   sensorAdi: string | null;
+  /** Pinli sensörde "şu pini oku" komutu gidiyor; kanallıda ölçüm kendi geliyor. */
+  sensorPinli: boolean;
 }
 
 /**
@@ -480,13 +501,20 @@ function onizleme(g: OnizlemeGirdisi): string[] {
     if (g.havaSuresi > 0) adimlar.push(`hava pompası ${g.havaSuresi} ms`);
     adimlar.push("ucu güvenli yüksekliğe çek");
   } else {
-    adimlar.push(
-      `${nokta} noktasına git`,
-      `probu ${g.probDerinlik} mm derine batır`,
-      `${g.bekleme} ms bekle — okuma dengelensin`,
-      g.sensorAdi ? `${g.sensorAdi} sensörünü oku` : "⚠ sensör tanımsız — okuma yok",
-      "probu topraktan çek",
-    );
+    adimlar.push(`${nokta} noktasına git`, `probu ${g.probDerinlik} mm derine batır`);
+    if (!g.sensorAdi) {
+      adimlar.push("⚠ sensör tanımsız — okuma yok");
+    } else if (g.sensorPinli) {
+      adimlar.push(`${g.bekleme} ms bekle — okuma dengelensin`, `${g.sensorAdi} sensörünü oku`);
+    } else {
+      // Kanallı sensörde okuma istenmiyor: Arduino kendi döngüsünde
+      // yayınlıyor ve ölçüm alındığı andaki konumla damgalanıyor. Bekleme
+      // bu yüzden hem dengelenme hem de "en az bir ölçüm gelsin" süresi.
+      adimlar.push(
+        `${g.bekleme} ms bekle — ${g.sensorAdi} ölçümü kendiliğinden gelir`,
+      );
+    }
+    adimlar.push("probu topraktan çek");
   }
 
   return adimlar;

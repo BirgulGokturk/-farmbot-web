@@ -78,3 +78,31 @@ class TestUcNokta:
             if hasattr(r, "methods")
         }
         assert ("/api/v1/devices/{device_id}/control/spot", ("POST",)) in yollar
+
+
+class TestKanalliSensor:
+    """Pinsiz (kanallı) sensör — sahadaki toprak nemi sensörü böyle çalışıyor.
+
+    Arduino A1'i kendi döngüsünde okuyup `soil_moisture` kanalını yayınlıyor;
+    panel ona "şu pini oku" diyemiyor. Uç nokta bunu bir hata sayıyordu ve
+    doğru kurulmuş bir donanımı arızalı gibi gösteriyordu.
+    """
+
+    def test_pinsizken_okuma_adimi_uretilmiyor(self) -> None:
+        adimlar = commands.toprak_olc(
+            x=0, y=0, soil_z=0, safe_z=100, depth_mm=30, pin=None
+        )
+        assert [a["kind"] for a in adimlar] == [
+            "move_absolute",
+            "move_absolute",
+            "wait",
+            "move_absolute",
+        ]
+
+    def test_pinsizken_de_batip_cikiyor(self) -> None:
+        """Ölçüm kendiliğinden geliyor ama robot doğru yerde durmalı."""
+        adimlar = commands.toprak_olc(
+            x=0, y=0, soil_z=0, safe_z=100, depth_mm=30, pin=None
+        )
+        assert adimlar[1]["args"]["location"]["args"]["z"] == -30
+        assert adimlar[-1]["args"]["location"]["args"]["z"] == 100
