@@ -127,6 +127,42 @@ async def api_root() -> dict[str, str]:
     }
 
 
+def _calisan_commit() -> str | None:
+    """Sürecin başlatıldığı andaki HEAD — süreç ömrü boyunca sabit.
+
+    `git` çağırmak yerine dosyadan okuyoruz: sunucu sürecinde alt süreç
+    açmamak, hem daha hızlı hem de `git` kurulu olmayan bir kapta (Docker,
+    Render) sessizce çalışmaya devam ediyor.
+    """
+    # Depo kökünü yukarı doğru arıyoruz: sabit bir seviye saymak, dosya
+    # taşındığında sessizce `None` döndürmeye başlardı.
+    kok = next(
+        (a / ".git" for a in Path(__file__).resolve().parents if (a / ".git").is_dir()),
+        None,
+    )
+    if kok is None:
+        return None
+    try:
+        head = (kok / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref:"):
+            ref = head.split(" ", 1)[1].strip()
+            hedef = kok / ref
+            if hedef.exists():
+                return hedef.read_text(encoding="utf-8").strip()[:7]
+            # Referans paketlenmişse (packed-refs) düz dosya yoktur
+            for satir in (kok / "packed-refs").read_text(encoding="utf-8").splitlines():
+                if satir.endswith(f" {ref}"):
+                    return satir.split(" ", 1)[0][:7]
+            return None
+        return head[:7]  # ayrık HEAD
+    except OSError:
+        return None  # git yok ya da okunamıyor — sürüm bilgisi olmadan devam
+
+
+# Süreç başlarken bir kez okunuyor: amaç zaten **çalışan** kodun sürümü.
+_COMMIT = _calisan_commit()
+
+
 @app.get("/health", tags=["Sistem"])
 async def health() -> dict[str, object]:
     """Bulut sağlayıcılarının sağlık kontrolü için."""
@@ -142,6 +178,15 @@ async def health() -> dict[str, object]:
         "mqtt_connected": bridge.connected,
         "simulated_robots": simulator.active_count,
         "tracked_devices": len(hub.known_devices()),
+        # Çalışan sürecin hangi commit'ten geldiği.
+        #
+        # Sahada teşhisi en zor durum "yarısı yeni yarısı eski" sistemdi:
+        # `git pull` kodu getirdi, arayüz derlendi, ama servis yeniden
+        # başlatılmadığı için Python eski süreçte kaldı. Panel yeni
+        # önizlemeyi gösterirken sunucu düzeltilmiş bir hatayı vermeye devam
+        # etti. Diskteki commit ile buradaki commit'i karşılaştırmak bunu tek
+        # bakışta söylüyor; güncelleme betiği de bunu kontrol ediyor.
+        "commit": _COMMIT,
     }
 
 

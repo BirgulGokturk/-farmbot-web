@@ -39,17 +39,56 @@ else
 fi
 
 echo "── 4/5  Servisler yenileniyor"
+#
+# Bulunamayan servis **sessizce atlanmıyor**.
+#
+# Sahada tam bunu yaşadık: API servisi beklenen adda değildi, betik adımı
+# atladı ve hiçbir uyarı vermedi. Statik dosyalar diskten okunduğu için arayüz
+# güncellendi, Python kodu eski süreçte kaldı — panel yeni önizlemeyi
+# gösterirken sunucu düzeltilmiş bir hatayı vermeye devam etti. Yarısı yeni
+# yarısı eski bir sistemi teşhis etmek, hiç güncellenmemiş olandan çok daha zor.
+YENILENEN=0
 for servis in farmbot-api farmbot-agent; do
   if systemctl list-unit-files | grep -q "^${servis}.service"; then
     sudo systemctl restart "$servis"
     echo "        $servis yeniden başlatıldı"
+    YENILENEN=$((YENILENEN + 1))
+  else
+    echo "        UYARI: $servis.service bulunamadı — YENİDEN BAŞLATILMADI."
+    echo "               Kod diskte güncel ama çalışan süreç eski."
+    BENZER=$(systemctl list-unit-files --type=service --no-legend \
+             | awk '{print $1}' | grep -i farm | tr '\n' ' ')
+    if [ -n "$BENZER" ]; then
+      echo "               Bu makinedeki farmbot servisleri: $BENZER"
+    else
+      echo "               Bu makinede farmbot servisi yok gibi görünüyor."
+    fi
   fi
 done
 
+if [ "$YENILENEN" -eq 0 ]; then
+  echo
+  echo "        Hiçbir servis yenilenmedi. Yukarıdaki adlardan doğru olanı"
+  echo "        elle başlatın:  sudo systemctl restart <servis-adı>"
+fi
+
 echo "── 5/5  Kontrol"
 sleep 6
-if curl -fsS -m 10 localhost:8000/health > /dev/null 2>&1; then
-  echo "        API ayakta"
+SAGLIK=$(curl -fsS -m 10 localhost:8000/health 2>/dev/null || true)
+if [ -n "$SAGLIK" ]; then
+  # "Ayakta" yetmiyor: eski süreç de gayet sağlıklı yanıt veriyor. Asıl soru
+  # **hangi kodun** çalıştığı. API kendi commit'ini bildiriyor; diskteki
+  # sürümle karşılaştırıyoruz.
+  CALISAN=$(printf '%s' "$SAGLIK" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')
+  if [ -z "$CALISAN" ] || [ "$CALISAN" = "null" ]; then
+    echo "        API ayakta (sürüm bildirmiyor — muhtemelen eski sürüm)"
+  elif [ "$CALISAN" = "$(git rev-parse --short=7 HEAD)" ]; then
+    echo "        API ayakta ve güncel ($CALISAN)"
+  else
+    echo "        UYARI: API ayakta ama ESKİ KOD çalışıyor"
+    echo "               diskte $(git rev-parse --short=7 HEAD), süreçte $CALISAN"
+    echo "               Servis yeniden başlatılmamış olabilir."
+  fi
 else
   echo "        UYARI: API yanıt vermiyor — journalctl -u farmbot-api -n 30"
 fi
