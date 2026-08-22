@@ -340,6 +340,36 @@ function readChangeArea(raw: unknown): ChangeArea {
   return { enabled: Boolean(source.enabled), corners };
 }
 
+/**
+ * Makinenin gerçekten gidebildiği aralık — Gantry Studio'nun kalibrasyonundan.
+ *
+ * Panelin "Çalışma Alanı" ölçüleriyle **aynı şey değil**. Orada yazan sayılar
+ * kullanıcının girdiği yatak ölçüsü; burada duran, PLC'nin yumuşak sınırı.
+ * İkisi ayrıldığında panel kabul ediyor ama robot reddediyor ve hata makine
+ * dilinde geliyor ("Y target -1.8 mm outside limits [0.0, 480.0]") — komutu
+ * gönderen kişi için hiçbir şey ifade etmiyor.
+ *
+ * Durum ağacı gelmediyse `null`: sınır bilinmiyorsa uydurmak, olmayan bir
+ * engel yaratmak olurdu.
+ */
+export interface MachineSpan {
+  min: number;
+  max: number;
+}
+
+export function readMachineSpans(
+  status: { diagnostics?: { machine_calib?: Record<string, { min: number; max: number }> } } | null,
+): Record<AxisName, MachineSpan | null> {
+  const calib = status?.diagnostics?.machine_calib;
+  const oku = (eksen: AxisName): MachineSpan | null => {
+    const ham = calib?.[eksen];
+    if (!ham || typeof ham.min !== "number" || typeof ham.max !== "number") return null;
+    // Ters kalibre edilmiş bir eksende min > max gelebiliyor; sıralıyoruz.
+    return { min: Math.min(ham.min, ham.max), max: Math.max(ham.min, ham.max) };
+  };
+  return { x: oku("x"), y: oku("y"), z: oku("z") };
+}
+
 /** `device.settings` içinden eksiksiz bir yapılandırma çıkarır. */
 export function readMachineConfig(settings: Record<string, unknown> | undefined): MachineConfig {
   const source = (settings ?? {}) as Record<string, unknown>;

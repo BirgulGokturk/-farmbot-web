@@ -25,6 +25,8 @@ import { UcYuvalari } from "@/components/settings/UcYuvalari";
 import { AlertRules } from "@/components/settings/AlertRules";
 import { InstallApp } from "@/components/settings/InstallApp";
 import { api } from "@/lib/api";
+import { readMachineSpans } from "@/lib/machine";
+import { useBot } from "@/store/useBot";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
 import { useAuth } from "@/store/useAuth";
 import { useTheme } from "@/store/useTheme";
@@ -195,6 +197,7 @@ function DeviceSettings({ device }: { device: Device }) {
 
 function WorkspaceSettings({ device }: { device: Device }) {
   const queryClient = useQueryClient();
+  const spans = readMachineSpans(useBot((s) => s.status));
   const [dims, setDims] = useState({
     bed_width_mm: String(device.bed_width_mm),
     bed_length_mm: String(device.bed_length_mm),
@@ -218,6 +221,44 @@ function WorkspaceSettings({ device }: { device: Device }) {
     },
     onError: (error) => toast.error("Kaydedilemedi", (error as Error).message),
   });
+
+  /*
+   * Buradaki sayılar makinenin gerçek strokuyla uyuşmak zorunda.
+   *
+   * Uyuşmadığında panel komutu kabul ediyor, robot reddediyor ve hata makine
+   * dilinde geliyor ("Y target -1.8 mm outside limits [0.0, 480.0]"). Sahada
+   * yatak 5900x2900 girilmişti, makine ise 450x480 gidiyordu; tasarımcıya
+   * konulan her bitki ulaşılamaz bir noktadaydı ve bunu söyleyen hiçbir şey
+   * yoktu.
+   *
+   * Makine sınırı yalnızca robot bağlıyken biliniyor; bilinmiyorsa uyarı da
+   * çıkmıyor — olmayan bir engel uydurmak istemiyoruz.
+   */
+  const uyusmazlik: string[] = [];
+  const karsilastir = (eksen: "x" | "y" | "z", girilen: number, ad: string) => {
+    const span = spans[eksen];
+    if (!span) return;
+    const strok = span.max - span.min;
+    // Küçük farklar ölçüm payı; kat kat büyük fark gerçek bir uyuşmazlık.
+    if (girilen > strok * 1.05) {
+      uyusmazlik.push(
+        `${ad} ${girilen} mm girilmiş ama makine ${eksen.toUpperCase()} ekseninde ` +
+          `${span.min.toFixed(0)}–${span.max.toFixed(0)} mm gidiyor.`,
+      );
+    }
+  };
+  karsilastir("x", Number(dims.bed_width_mm) || 0, "Genişlik");
+  karsilastir("y", Number(dims.bed_length_mm) || 0, "Uzunluk");
+
+  const yuzey = Number(dims.soil_height_mm);
+  const zSpan = spans.z;
+  if (zSpan && Number.isFinite(yuzey) && (yuzey < zSpan.min || yuzey > zSpan.max)) {
+    uyusmazlik.push(
+      `Toprak yüzeyi Z ${yuzey} mm, makinenin Z aralığının dışında ` +
+        `(${zSpan.min.toFixed(0)}–${zSpan.max.toFixed(0)} mm). Ekim ve ölçüm ` +
+        `bu değerden derinlik çıkarıyor; hedef daha da dışarı düşer.`,
+    );
+  }
 
   return (
     <Card>
@@ -263,6 +304,14 @@ function WorkspaceSettings({ device }: { device: Device }) {
           onChange={(e) => setDims({ ...dims, safe_height_mm: e.target.value })}
         />
       </div>
+      {uyusmazlik.length > 0 && (
+        <ul className="mt-3 space-y-1 rounded-xl bg-warning/10 p-3 text-xs leading-relaxed text-warning">
+          {uyusmazlik.map((u) => (
+            <li key={u}>{u}</li>
+          ))}
+        </ul>
+      )}
+
       <Button variant="primary" fullWidth className="mt-4" loading={save.isPending} onClick={() => save.mutate()}>
         Kaydet
       </Button>

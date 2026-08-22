@@ -45,7 +45,7 @@ import {
 import { NumberField } from "@/components/ui/NumberField";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
-import { readMachineConfig } from "@/lib/machine";
+import { readMachineConfig, readMachineSpans } from "@/lib/machine";
 import { cn } from "@/lib/cn";
 import { useActiveDevice, useDeviceId } from "@/hooks/useDevice";
 import { useBot, useBotPosition } from "@/store/useBot";
@@ -96,6 +96,7 @@ export default function Nokta() {
   const { data: device } = useActiveDevice();
   const konum = useBotPosition();
   const sonOlcumler = useBot((s) => s.lastReadings);
+  const botDurumu = useBot((s) => s.status);
 
   const [is, setIs] = useState<SpotAction>("sow");
   const [x, setX] = useState(0);
@@ -187,6 +188,40 @@ export default function Nokta() {
     engeller.push(
       `Nokta çalışma alanının dışında (X 0–${device!.bed_width_mm}, Y 0–${device!.bed_length_mm} mm).`,
     );
+  }
+
+  /*
+   * Makinenin gerçek aralığı ayrı bir kontrol.
+   *
+   * "Çalışma Alanı" ayarındaki yatak ölçüsü kullanıcının girdiği sayı;
+   * makinenin gidebildiği yer ise PLC'nin yumuşak sınırı. İkisi ayrıldığında
+   * panel komutu kabul ediyor, robot reddediyor ve hata makine dilinde
+   * dönüyor: "Y target -1.8 mm outside limits [0.0, 480.0]". Komutu gönderen
+   * için bu cümle hiçbir şey ifade etmiyor — burada, Türkçe ve çalıştırmadan
+   * önce söylüyoruz.
+   */
+  const spans = readMachineSpans(botDurumu);
+  const disari = (eksen: "x" | "y" | "z", deger: number, ad: string) => {
+    const span = spans[eksen];
+    if (!span || (deger >= span.min && deger <= span.max)) return;
+    engeller.push(
+      `${ad} ${deger.toFixed(0)} mm, makinenin ${eksen.toUpperCase()} aralığının ` +
+        `dışında (${span.min.toFixed(0)}–${span.max.toFixed(0)} mm).`,
+    );
+  };
+  disari("x", x, "Hedef X");
+  disari("y", y, "Hedef Y");
+
+  // İnilecek Z de sınır içinde olmalı; en sık gözden kaçan bu, çünkü
+  // ekranda hiçbir yerde yazmıyor — toprak yüzeyi ayarından hesaplanıyor.
+  if (device) {
+    if (is === "sow") {
+      disari("z", device.soil_height_mm - (derinlik ?? config.seeder.default_depth_mm), "Tohum Z'si");
+    } else if (is === "soil_probe") {
+      disari("z", device.soil_height_mm - (probDerinlik ?? config.probe.depth_mm), "Prob Z'si");
+    } else {
+      disari("z", device.soil_height_mm, "Toprak yüzeyi Z");
+    }
   }
 
   // Yayındaki son ölçüm, komutun **sonucu değil**. Kanallı sensör iki
