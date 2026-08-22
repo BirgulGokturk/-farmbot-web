@@ -88,9 +88,10 @@ Wants=network-online.target
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/farmbot-web/backend
-ExecStart=/home/pi/farmbot-web/backend/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+ExecStart=/home/pi/farmbot-web/backend/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 10
 Restart=always
 RestartSec=5
+TimeoutStopSec=20
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=farmbot-api
@@ -100,6 +101,23 @@ WantedBy=multi-user.target
 ```
 
 `--host 0.0.0.0` şart: `127.0.0.1` yalnızca Pi'nin kendisinden erişilir.
+
+**`--timeout-graceful-shutdown` ve `TimeoutStopSec` neden var**
+
+API, ajan ve panelle **WebSocket** üzerinden konuşuyor ve bu bağlantılar açık
+kalıyor. Uvicorn kapanırken varsayılan olarak bütün bağlantıların kapanmasını
+bekliyor; WebSocket kendiliğinden kapanmadığı için süreç SIGTERM'e yanıt
+vermiyor. systemd de varsayılan 90 saniyelik süreyi doldurup SIGKILL çekiyor:
+
+```
+farmbot-api.service: Killing process 5065 (python) with signal SIGKILL.
+farmbot-api.service: Failed with result 'timeout'.
+```
+
+Sonuç: her güncellemede yaklaşık **bir buçuk dakika** 8000 portu kapalı
+kalıyor. Bu sürede ajan "Connect call failed" yazıyor ve panel açılmıyor —
+tablo tıpatıp "yeni kod çöktü"ye benziyor, oysa yalnızca eski süreç geç
+ölüyor. İki ayar bu bekleyişi 10 saniyeye indiriyor.
 
 ### 5. Ajanı yerele çevirin
 
