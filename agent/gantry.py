@@ -620,67 +620,23 @@ class GantryClient:
             {"cmd": "movej", "axis": AXIS_INDEX[axis], "value": value, "speed": effective}
         )
 
-    async def write_machine_calibration(self, axes: dict[str, Any]) -> None:
-        """Panelde girilen kalibrasyonu Gantry Studio'ya yazar.
-
-        Neden makineye yazıyoruz, kendimizde tutmuyoruz: PLC belgesine göre
-        `gantry_calib.json` tek doğru kaynak (PLC_BRIEF.md §5). Kendi kopyamızı
-        tutsaydık okuma bizim değerimizle, hareket Gantry Studio'nunkiyle
-        yapılırdı — ikisi ayrışınca konum ile gerçek yer birbirini tutmazdı.
-
-        Yazma başarısız olursa **sessiz kalmıyoruz**: kullanıcı kaydet düğmesine
-        bastıysa sonucu görmeli.
-        """
-        payload = []
-        for name in ("x", "y", "z"):
-            cfg = axes.get(name) or {}
-            merged = self.calibration._resolved(name)
-            limits = self.calibration.effective_limits(name)
-            payload.append(
-                {
-                    "cpm": merged["cpm"],
-                    "dir": int(merged["dir"]),
-                    "home": merged["home"],
-                    "min": 0.0 if limits[0] is None else limits[0],
-                    "max": 0.0 if limits[1] is None else limits[1],
-                }
-            )
-
-        try:
-            response = await self._http.post(
-                "/api/calib", json={"calib": payload}, timeout=self._command_timeout
-            )
-            response.raise_for_status()
-            result = response.json()
-        except Exception as exc:
-            raise GantryUnavailable(
-                f"Kalibrasyon Gantry Studio'ya yazılamadı ({exc}). "
-                "Bu sürümde kalibrasyon yazma uç noktası olmayabilir."
-            ) from exc
-
-        if isinstance(result, dict) and not result.get("ok", True):
-            raise GantryUnavailable(result.get("error") or "Kalibrasyon reddedildi")
-
-        await self.refresh_machine_limits()
-        logger.info("Kalibrasyon Gantry Studio'ya yazıldı")
-
-    async def apply_motion_profile(self, axis: str) -> None:
-        """Eksenin hız/ivme değerlerini Gantry Studio'ya yazar.
-
-        Bu, her hareketle değil yalnızca kullanıcı ayarlar sayfasından açıkça
-        istediğinde çağrılıyor: PLC'ye yazan bir işlem sessizce arka planda
-        çalışmamalı.
-        """
-        cfg = self.calibration.get(axis)
-        await self.command(
-            {
-                "cmd": "speed",
-                "axis": AXIS_INDEX[axis],
-                "vel": float(cfg["speed"] if cfg.get("speed") is not None else 20.0),
-                "accel": float(cfg["accel"] if cfg.get("accel") is not None else 100.0),
-                "decel": float(cfg["accel"] if cfg.get("accel") is not None else 100.0),
-            }
-        )
+    # Kalibrasyon ve hareket profilini Gantry Studio'ya **yazmıyoruz**.
+    #
+    # Bir zamanlar iki fonksiyon vardı: `write_machine_calibration` panelde
+    # girilen cpm/dir/home/min/max değerlerini `/api/calib`'e, o da Gantry
+    # Studio'nun `gantry_calib.json` dosyasına yazıyordu; `apply_motion_profile`
+    # de hız/ivmeyi PLC'ye yazıyordu. İkisi de hiçbir yerden çağrılmıyordu.
+    #
+    # Silindiler çünkü kurulu bir silahtılar. Sınırlar bilinmiyorken
+    # `write_machine_calibration` `min: 0.0, max: 0.0` yazıyordu — bu, her
+    # ekseni "hiçbir yere gidemez" hâline getirir ve sahada kusursuz çalışan
+    # Gantry Studio'yu, bizim panelimizdeki boş bir alan yüzünden bozardı.
+    # Geri alması da kolay değil: dosya üzerine yazılmış oluyor.
+    #
+    # Kalibrasyon Gantry Studio'nun kendi ekranından yapılıyor; biz `/api/calib`
+    # ve `/api/tools` uçlarını yalnızca **okuyoruz**. Yazdığımız tek şey
+    # hareket komutları (`/api/cmd`) ve uç değiştirme (`/api/tool`) — ikisi de
+    # anlık eylem, kalıcı ayar değil.
 
     async def emergency_stop(self) -> None:
         """Tüm jog'ları durdurur ve sürücüleri devre dışı bırakır."""
